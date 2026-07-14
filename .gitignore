@@ -1,0 +1,43 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Trained models / checkpoints
+models/
+*.zip
+*.pt
+*.pth
+
+# TensorBoard / training logs
+sac_snake_tensorboard/
+*_tensorboard/
+runs/
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env

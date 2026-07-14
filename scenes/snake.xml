@@ -1,0 +1,252 @@
+<mujoco model="snake">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+
+  <option integrator="implicitfast"/>
+
+  <default>
+    <geom friction="3 0.005 0.0001" />
+  </default>
+  <asset>
+    <!-- ナシ -->
+  </asset>
+  <worldbody>
+    <light name="spotlight" mode="targetbodycom" target="frame_0-1" pos="0 -1 2"/>
+    
+    <!--  ================= SNAKE ================= /-->
+    <body name="frame_0-1" pos="0.5 0 0" quat="0 0 0 1">
+      <camera name="track" mode="trackcom" pos="0.5 1 1" xyaxes="-1 0 0 0 -1 1"/>
+      <joint type="free"/>
+      <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0235 0 .02675 " rgba="0.3 0.3 0.3 1"  /><!--motor box(head)-->
+      <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0075 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+      <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0075 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+
+      <body name="frame0-2" pos="0.5 0 0"  >
+      <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" /><!--wheel joint-->
+      <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+      <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+      <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+      </body>
+
+      <body name="frame1_1" pos="0.035 0 0"  >
+        <joint name="Actuator1" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+        <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+        <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+        <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+        <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+        <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+        <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+        <body name="frame1-2" pos="0.03 0 0"  >
+        <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+        <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+        <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+        <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+        </body>
+
+        <body name="frame2_1" pos="0.065 0 0"  >
+          <joint name="Actuator2" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+          <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+          <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+          <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+          <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+          <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+          <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+          <body name="frame2-2" pos="0.03 0 0"  >
+          <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+          <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+          <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+          <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+          </body>
+
+          <body name="frame3_1" pos="0.065 0 0"  >
+            <joint name="Actuator3" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+            <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+            <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+            <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+            <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+            <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+            <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+            <body name="frame3-2" pos="0.03 0 0"  >
+            <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+            <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+            <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+            <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+            </body>
+
+            <body name="frame4_1" pos="0.065 0 0"  >
+              <joint name="Actuator4" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+              <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+              <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+              <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+              <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+              <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+              <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+              <body name="frame4-2" pos="0.03 0 0"  >
+              <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+              <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+              <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+              <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+              </body>
+
+              <body name="frame5_1" pos="0.065 0 0"  >
+                <joint name="Actuator5" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                <body name="frame5-2" pos="0.03 0 0"  >
+                <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                </body>
+
+                <body name="frame6_1" pos="0.065 0 0"  >
+                  <joint name="Actuator6" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                  <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                  <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                  <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                  <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                  <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                  <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                  <body name="frame6-2" pos="0.03 0 0"  >
+                  <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                  <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                  <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                  <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                  </body>
+
+                  <body name="frame7_1" pos="0.065 0 0"  >
+                    <joint name="Actuator7" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                    <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                    <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                    <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                    <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                    <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                    <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                    <body name="frame7-2" pos="0.03 0 0"  >
+                    <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                    <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                    <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                    <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                    </body>
+
+                    <body name="frame8_1" pos="0.065 0 0"  >
+                      <joint name="Actuator8" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                      <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                      <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                      <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                      <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                      <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                      <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                      <body name="frame8-2" pos="0.03 0 0"  >
+                      <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                      <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                      <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                      <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                      </body>
+
+                      <body name="frame9_1" pos="0.065 0 0"  >
+                        <joint name="Actuator9" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                        <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                        <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                        <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                        <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                        <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                        <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                        <body name="frame9-2" pos="0.03 0 0 " >
+                        <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                        <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                        <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                        <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                        </body>
+
+                        <body name="frame10_1" pos="0.065 0 0"  >
+                          <joint name="Actuator10" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                          <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                          <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                          <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                          <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                          <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                          <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                          <body name="frame10-2" pos="0.03 0 0"  >
+                          <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                          <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                          <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                          <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                          </body>
+
+                          <body name="frame11_1" pos="0.065 0 0"  >
+                            <joint name="Actuator11" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                            <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                            <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                            <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                            <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                            <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                            <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                            <body name="frame11-2" pos="0.03 0 0"  >
+                            <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                            <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                            <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                            <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                            </body>
+
+                            <body name="frame12_1" pos="0.065 0 0"  >
+                              <joint name="Actuator12" pos="0 0 0" axis="0 0 1" limited="true" range="-3 3"/>
+                              <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .04355 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                              <geom density="1000" type="box" size=".015 .01 .0001" pos= ".015 0 .00905 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                              <geom density="1000" type="box" size=".001 .01 .01675" pos= ".029 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--connecter-->
+                              <geom density="1000" type="box" size=".0235 .014 .01675" pos= ".0535 0 .02675 " rgba="0.3 0.3 0.3 1" /><!--motor box-->
+                              <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 -.01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+                              <geom density="1000" type="box" size=".0075 .00275 .021" pos= ".0375 .01675 .0225 " rgba="0.5 0.5 0.5 1" /><!--side box-->
+
+                              <body name="frame12-2" pos="0.03 0 0" >
+                              <joint  pos=".0075 -.014 .0035" axis="0 1 0" limited="false" />
+                              <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 -.014 .0035 .0075 -.012 .0035" rgba="0.3 0.3 0.3 1" /><!--Left wheel-->
+                              <geom density="1000" type="cylinder" size=".0035" fromto= ".0075 .014 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--Right wheel-->
+                              <geom density="1000" type="cylinder" size=".001" fromto= ".0075 -.012 .0035 .0075 .012 .0035" rgba="0.3 0.3 0.3 1" /><!--wheel axle-->
+                              </body>
+                            </body>
+                          </body>
+                        </body>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+
+  <actuator>
+    <position name="Actuator1" joint="Actuator1" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator2" joint="Actuator2" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator3" joint="Actuator3" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator4" joint="Actuator4" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator5" joint="Actuator5" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator6" joint="Actuator6" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator7" joint="Actuator7" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator8" joint="Actuator8" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator9" joint="Actuator9" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator10" joint="Actuator10" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator11" joint="Actuator11" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+    <position name="Actuator12" joint="Actuator12" kp = "5" kv = "0.4" ctrllimited="true" ctrlrange="-3 3"/>
+  </actuator>
+</mujoco>
