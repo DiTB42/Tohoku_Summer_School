@@ -105,7 +105,7 @@ if __name__ == "__main__":
     # visualized. With train_freq=[1, step] and gradient_steps=1, one env step
     # corresponds to one gradient update, so save_freq is in env steps.
     checkpoint_callback = CheckpointCallback(
-        save_freq=200,
+        save_freq=2000,
         save_path="models/checkpoints",
         name_prefix="sac_snake",
     )
