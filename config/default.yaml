@@ -6,43 +6,49 @@
 reward:
   # 論文 (式12) の報酬は r1/r2/r3 の3項のみ。下の3重みは「学生が設計・調整する対象」
   # (docs/STUDENT_TASKS_JP.md 課題2)。r3 は罰則なので env 側で減算している。
-  w_progress: 10.0          # r1: weight of 1/(0.1+distance)  (proximity)
-  w_velocity: 2000.0        # r2: weight of closing speed
-  w_smoothness: 0.1         # r3: weight of action-change penalty (subtracted)
+  w_progress: 15.0          # r1: weight of 1/(0.1+distance)  (proximity)
+  w_velocity: 200.0         # r2: weight of closing speed
+  w_smoothness: 1.0         # r3: weight of action-change penalty (subtracted)
   waypoint_threshold: 0.7   # distance under which a waypoint/goal counts as reached
 
 cpg:
   frequency_hz: 50.0        # CPG update frequency for standalone use (dt = 1/frequency_hz)
   convergence_rate: 63.0    # a parameter
   coupling_strength: 3.0    # mu parameter
-  base_amplitude: 1.0       # R (fixed action space runs)
-  base_omega: 1.0           # omega (fixed action space runs)
+  base_amplitude: 0.4       # R (fixed action space runs)
+  base_omega: 2.0           # omega (fixed action space runs)
   base_delta: 0.0           # delta (fixed action space runs)
-  base_phase_shift: 0.7853981633974483  # theta (pi/4)
+  base_phase_shift: 0.52  # theta (pi/6)
 
 training:
   algorithm: SAC
   learning_rate: 1.0e-3
-  batch_size: 1028
+  batch_size: 128
   buffer_size: 9000000
-  tau: 0.18
-  gamma: 0.5
+  tau: 0.005
+  gamma: 0.99
   ent_coef: auto
   train_freq: [1, step]
   gradient_steps: 1
-  total_timesteps: 10000
+  total_timesteps: 100000
   log_interval: 4
   tensorboard_log: sac_snake_tensorboard/
   model_save_path: models/sac_snake_final
 
 env:
   cpg_frequency: 50
-  rl_frequency: 0.1
-  max_episode_steps: 300
-  maze_height: 3           # KEEP: corridor-only, see README Limitations
-  maze_width: 7
-  # 学生課題1 (行動空間 R⁴ 化, docs/STUDENT_TASKS_JP.md): 現状はスカラー θ のみの
-  # 範囲。R⁴ に拡張する際は、各パラメータ (R, ω, θ, δ) の範囲をここ／env_snake.py の
-  # action_space に定義し直すこと。
-  action_low: 0.5          # theta lower bound (reduced action space, see README)
-  action_high: 1.0         # theta upper bound
+  rl_frequency: 0.2
+  max_episode_steps: 250
+  maze_height: 10           # KEEP: corridor-only, see README Limitations
+  maze_width: 10
+  # 学生課題1 (行動空間 R⁴ 化, docs/STUDENT_TASKS_JP.md): 行動空間は
+  # (R, ω, θ, δ) の4次元。各リストは [R, omega, theta, delta] の順。
+  #   R     : joint amplitude (rad)
+  #   omega : oscillation speed (rad/s)
+  #   theta : phase shift between joints (rad)
+  #   delta : joint offset (0 = straight, nonzero = turn)
+  action_low:  [0.4, 2, 0.2, -0.1]
+  action_high: [0.4, 2, 0.8,  0.1]
+  # Goal must be at least this many maze cells (Manhattan) from the start,
+  # so it never spawns right next to the snake.
+  min_goal_distance: 2

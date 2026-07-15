@@ -1,14 +1,31 @@
+import argparse
 import numpy as np
 from stable_baselines3 import SAC
 from env_snake import SnakeEnv
+from config_utils import load_config
 
 if __name__ == "__main__":
-    # Carica il modello
-    model = SAC.load("models/sac_snake_final.zip")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("model_path", type=str, nargs="?",
+                        default="models/sac_snake_final.zip",
+                        help="Path to the saved model .zip "
+                             "(e.g. models/checkpoints/sac_snake_600_steps.zip)")
+    parser.add_argument("--config", type=str, default="config/default.yaml",
+                        help="Path to the YAML config (must match what the "
+                             "model was trained with, e.g. maze size). "
+                             "Default: config/default.yaml")
+    parser.add_argument("--episodes", type=int, default=5,
+                        help="Number of episodes to run (default: 5)")
+    args = parser.parse_args()
 
-    # Crea l'ambiente in modalità rendering (opzionale)
-    env = SnakeEnv(render_mode="human")
-    n_episodes = 5
+    # Load the model
+    model = SAC.load(args.model_path)
+
+    # Create the environment in rendering mode, using the same config the
+    # model was trained with (maze size, frequencies, reward, ...).
+    config = load_config(args.config)
+    env = SnakeEnv(render_mode="human", config=config)
+    n_episodes = args.episodes
 
     for ep in range(n_episodes):
         obs, _ = env.reset()

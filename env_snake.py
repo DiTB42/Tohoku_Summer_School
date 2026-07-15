@@ -33,14 +33,12 @@ class SnakeEnv(gym.Env):
         self.maze_xml_path = 'scenes/scene_maze_trial.xml'
 
 
-        # TODO(学生課題1: 行動空間を R⁴ に拡張 — docs/STUDENT_TASKS_JP.md 参照):
-        #   現状はスカラー θ のみの1次元行動。論文 §3 の (R, ω, θ, δ) にするには、
-        #   この Box を4次元にし、各成分の low/high を各パラメータ範囲へ広げること。
-        #   例: low=[R_lo, ω_lo, θ_lo, δ_lo], high=[R_hi, ω_hi, θ_hi, δ_hi]
-        #   (SB3 の SAC は tanh 出力を Box 境界へ自動スケールするので明示スケーリング不要)
+        # 学生課題1: 行動空間 R⁴ = (R, ω, θ, δ). 各成分の low/high は
+        # config/default.yaml の action_low / action_high (順: [R, omega, theta, delta])。
+        # SB3 の SAC は tanh 出力を Box 境界へ自動スケールするので明示スケーリング不要。
         self.action_space = spaces.Box(
-            low=np.array([config.env.action_low]),
-            high=np.array([config.env.action_high]),
+            low=np.array(config.env.action_low, dtype=np.float32),
+            high=np.array(config.env.action_high, dtype=np.float32),
             dtype=np.float32,
         )
 
@@ -64,6 +62,13 @@ class SnakeEnv(gym.Env):
 
         self.render_mode = render_mode
         self.viewer = None
+        # Playback speed for the human viewer. 1.0 = real physics time
+        # (each substep drawn and paused by one physics timestep). Increase
+        # to slow the animation down further (e.g. 4.0 = 4x slower).
+        self.render_slowdown = 2.0
+        # Current CPG parameters, shown as a text overlay in the viewer.
+        self._display_params = {"R": self.R, "omega": self.omega,
+                                "theta": 0.0, "delta": self.delta}
 
     def _maze_to_world(self, maze_pos):
         """ maze coordinates in mujoco coordinates"""
@@ -77,9 +82,22 @@ class SnakeEnv(gym.Env):
             self.close()
         self.maze_layout = create_maze_layout(self.config.env.maze_height, self.config.env.maze_width)
         self.valid_spawn_points_maze = get_valid_spawn_points(self.maze_layout)
-        # Random Goal 
-        goal_idx = self.np_random.integers(0, len(self.valid_spawn_points_maze))
-        goal_pos_maze = self.valid_spawn_points_maze[goal_idx]
+        # Random Goal. Require the goal to be at least min_goal_distance maze
+        # cells (Manhattan) away from the start, so it never coincides with or
+        # sits right next to the snake's spawn (which would end the episode in
+        # ~1 step via the goal-reached check in step()).
+        sx, sy = self.start_pos_maze
+        min_dist = self.config.env.min_goal_distance
+        goal_candidates = [p for p in self.valid_spawn_points_maze
+                           if abs(p[0] - sx) + abs(p[1] - sy) >= min_dist]
+        if not goal_candidates:
+            # Fall back to anything that isn't the start cell itself.
+            goal_candidates = [p for p in self.valid_spawn_points_maze
+                               if tuple(p) != self.start_pos_maze]
+        if not goal_candidates:
+            goal_candidates = self.valid_spawn_points_maze
+        goal_idx = self.np_random.integers(0, len(goal_candidates))
+        goal_pos_maze = goal_candidates[goal_idx]
         
         # A* path towards new goal
         path_maze = astar(self.maze_layout, self.start_pos_maze, goal_pos_maze)
@@ -177,15 +195,19 @@ class SnakeEnv(gym.Env):
         """Performs an environment step."""
         self.current_step += 1
         reward_cfg = self.config.reward
-        # ------------------------------------------------------------------
-        # TODO(学生課題1: 行動空間を R⁴ に拡張 — docs/STUDENT_TASKS_JP.md 参照):
-        #   現状は行動がスカラー θ のみで、R・ω・δ は固定値 (self.R / self.omega /
-        #   self.delta) を使っている。論文 §3 の行動空間 (R, ω, θ, δ) にするには、
-        #   ここで action を4成分に分解して cpg.set_parameters に渡すこと。
-        #   例: R, omega, theta, delta = action
-        # ------------------------------------------------------------------
-        theta = action
-        self.cpg.set_parameters(R=self.R, omega = self.omega, theta=theta, delta=self.delta)
+        # 学生課題1: 行動空間 R⁴. action = [R, omega, theta, delta] を分解して
+        # CPG に渡す (以前は theta のみ学習し R/omega/delta は固定だった)。
+        R, omega, theta, delta = (float(x) for x in np.ravel(action))
+        self.cpg.set_parameters(R=R, omega=omega, theta=theta, delta=delta)
+
+        # Remember the CPG parameters currently driving the gait so the viewer
+        # overlay can display them.
+        self._display_params = {
+            "R": R,
+            "omega": omega,
+            "theta": theta,
+            "delta": delta,
+        }
 
         # Retrieve the current waypoint or goal (lookahead target used only
         # for reward shaping, see _get_current_target)
@@ -200,6 +222,11 @@ class SnakeEnv(gym.Env):
             self.data.ctrl[:] = clipped_targets
 
             mujoco.mj_step(self.model, self.data)
+
+            # Draw every physics substep so the motion is smooth and slow
+            # enough to follow, instead of jumping once per RL step.
+            if self.render_mode == "human":
+                self.render()
 
         new_head_pos = self.data.body('frame_0-1').xpos
         new_distance_to_waypoint = np.linalg.norm(current_target - new_head_pos)
@@ -240,26 +267,102 @@ class SnakeEnv(gym.Env):
         #   下の3重み (w_progress, w_velocity, w_smoothness) は config/default.yaml
         #   で調整する。r3 は罰則なので減算している (論文 §4.2: w1·r1 + w2·r2 − w3·r3)。
         # ------------------------------------------------------------------
-        reward = (
-            reward_cfg.w_progress * r1
-            + reward_cfg.w_velocity * r2
-            - reward_cfg.w_smoothness * r3
-        )
+        term_progress = reward_cfg.w_progress * r1
+        term_velocity = reward_cfg.w_velocity * r2
+        term_smoothness = reward_cfg.w_smoothness * r3  # penalty (subtracted below)
+        reward = term_progress + term_velocity - term_smoothness
 
         truncated = self.current_step >= self.max_episode_steps
         self.last_action = action
 
-        if self.render_mode == "human":
-            self.render()
+        # Expose the per-term breakdown so training can log/monitor the balance
+        # between the three reward components (see RewardTermCallback in
+        # train_sac.py). Raw (unweighted) values are included too.
+        info = {
+            "reward_total": float(reward),
+            "term_progress": float(term_progress),
+            "term_velocity": float(term_velocity),
+            "term_smoothness": float(term_smoothness),
+            "raw_r1_proximity": float(r1),
+            "raw_r2_closing": float(r2),
+            "raw_r3_action_delta": float(r3),
+        }
 
-        return self._get_obs(), reward, bool(terminated), bool(truncated), {}
+        return self._get_obs(), reward, bool(terminated), bool(truncated), info
+
+    def _draw_param_overlay(self):
+        """Draw a text label showing the CPG parameters currently driving the
+        gait, pinned to the bottom-center of the camera window (it does not
+        track the snake). The label geom is placed relative to the current
+        camera pose so it stays at the bottom of the view as the camera moves.
+        """
+        scn = self.viewer.user_scn
+        scn.ngeom = 0
+        p = self._display_params
+        label = (f"R={p['R']:.2f}  omega={p['omega']:.2f}  "
+                 f"theta={p['theta']:.3f}  delta={p['delta']:.2f}")
+
+        # Camera frame from the free-camera spherical parameters.
+        cam = self.viewer.cam
+        az = np.deg2rad(cam.azimuth)
+        el = np.deg2rad(cam.elevation)
+        ce, se, ca, sa = np.cos(el), np.sin(el), np.cos(az), np.sin(az)
+        forward = -np.array([ce * ca, ce * sa, se])   # camera -> lookat
+        forward /= np.linalg.norm(forward)
+        right = np.cross(forward, np.array([0.0, 0.0, 1.0]))
+        if np.linalg.norm(right) < 1e-6:
+            right = np.array([1.0, 0.0, 0.0])
+        right /= np.linalg.norm(right)
+        cam_up = np.cross(right, forward)
+        cam_up /= np.linalg.norm(cam_up)
+
+        lookat = np.array(cam.lookat)
+        dist = max(float(cam.distance), 0.1)
+        cam_pos = lookat - dist * forward
+        fovy = np.deg2rad(self.model.vis.global_.fovy)
+        # Sit at the lookat depth, pushed ~85% of the way to the bottom edge
+        # of the vertical field of view so the text hugs the bottom of the view.
+        pos = (cam_pos + forward * dist
+             + right * (dist * np.tan(fovy * 0.5) * 0.62)
+             - cam_up * (dist * np.tan(fovy * 0.5) * 0.72))
+
+        geom = scn.geoms[scn.ngeom]
+        mujoco.mjv_initGeom(
+            geom,
+            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+            size=np.array([0.008, 0.0, 0.0]),
+            pos=pos,
+            mat=np.eye(3).flatten(),
+            rgba=np.array([1.0, 0.9, 0.2, 0.9], dtype=np.float32),
+        )
+        geom.label = label
+        scn.ngeom += 1
+
+        # Draw a red sphere at the next waypoint so it is easy to see which
+        # waypoint the policy is currently trying to reach.
+        if self.current_waypoint_index < len(self.path_waypoints_world):
+            waypoint = self.path_waypoints_world[self.current_waypoint_index]
+            geom = scn.geoms[scn.ngeom]
+            mujoco.mjv_initGeom(
+                geom,
+                type=mujoco.mjtGeom.mjGEOM_SPHERE,
+                size=np.array([0.05, 0.0, 0.0]),
+                pos=waypoint,
+                mat=np.eye(3).flatten(),
+                rgba=np.array([1.0, 0.0, 0.0, 1.0], dtype=np.float32),
+            )
+            scn.ngeom += 1
 
     def render(self):
         if self.viewer is None and self.data is not None:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
         if self.viewer and self.viewer.is_running():
+            self._draw_param_overlay()
             self.viewer.sync()
-            time.sleep(1.0 / self.metadata['render_fps'])
+            # Pause by one physics timestep (scaled by render_slowdown) so the
+            # animation plays at real time when render_slowdown == 1.0, and
+            # slower for larger values.
+            time.sleep(self.model.opt.timestep * self.render_slowdown)
         elif self.viewer:
             self.close()
 

@@ -13,9 +13,9 @@ class RewardConfig:
     # Paper reward eq.(12) has three terms only (r1, r2, r3). The three
     # weights below are the design surface left to the student (see
     # docs/STUDENT_TASKS_JP.md, task 2).
-    w_progress: float = 10.0
-    w_velocity: float = 2000.0
-    w_smoothness: float = 0.1
+    w_progress: float = 15.0
+    w_velocity: float = 200.0
+    w_smoothness: float = 1.0
     waypoint_threshold: float = 0.7
 
 
@@ -58,8 +58,19 @@ class EnvConfig:
     max_episode_steps: int = 300
     maze_height: int = 3
     maze_width: int = 7
-    action_low: float = 0.5
-    action_high: float = 1.0
+    # 学生課題1: 行動空間 R⁴ = (R, omega, theta, delta). Per-parameter bounds,
+    # each a 4-element list ordered [R, omega, theta, delta].
+    action_low: list = None
+    action_high: list = None
+    # Minimum Manhattan distance (in maze cells) between the snake's start
+    # and the randomly chosen goal, so the goal never spawns right next to it.
+    min_goal_distance: int = 2
+
+    def __post_init__(self):
+        if self.action_low is None:
+            self.action_low = [0.2, 0.5, 0.2, -0.5]
+        if self.action_high is None:
+            self.action_high = [1.0, 3.0, 0.8, 0.5]
 
 
 @dataclass

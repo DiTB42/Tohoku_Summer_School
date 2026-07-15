@@ -3,6 +3,30 @@ import numpy as np
 from env_snake import SnakeEnv
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+
+
+class RewardTermCallback(BaseCallback):
+    """Logs the per-term reward breakdown (from env info dicts) to TensorBoard
+    so the balance between the three reward components can be monitored during
+    training. Each value is averaged over the logging interval."""
+
+    TERMS = (
+        "reward_total",
+        "term_progress",
+        "term_velocity",
+        "term_smoothness",
+        "raw_r1_proximity",
+        "raw_r2_closing",
+        "raw_r3_action_delta",
+    )
+
+    def _on_step(self) -> bool:
+        for info in self.locals.get("infos", []):
+            for key in self.TERMS:
+                if key in info:
+                    self.logger.record_mean(f"reward_terms/{key}", info[key])
+        return True
 import os
 import torch
 import sys
@@ -66,16 +90,31 @@ if __name__ == "__main__":
         train_freq=tuple(train_cfg.train_freq),
         gradient_steps=train_cfg.gradient_steps,
         tensorboard_log=train_cfg.tensorboard_log,
+        # 2 hidden layers of 64 units for both actor (pi) and critic (qf),
+        # instead of SB3's default [256, 256].
+        policy_kwargs=dict(net_arch=dict(pi=[64, 64], qf=[64, 64])),
         device=device,
     )
 
     # Create output directories
     os.makedirs("models", exist_ok=True)
+    os.makedirs("models/checkpoints", exist_ok=True)
+
+    # Save a checkpoint roughly every 200 updates so training progress can be
+    # visualized. With train_freq=[1, step] and gradient_steps=1, one env step
+    # corresponds to one gradient update, so save_freq is in env steps.
+    checkpoint_callback = CheckpointCallback(
+        save_freq=200,
+        save_path="models/checkpoints",
+        name_prefix="sac_snake",
+    )
+    reward_term_callback = RewardTermCallback()
 
     print("Starting training...")
     model.learn(
         total_timesteps=train_cfg.total_timesteps,
         log_interval=train_cfg.log_interval,
+        callback=[checkpoint_callback, reward_term_callback],
     )
 
     # Save the final model
