@@ -46,14 +46,15 @@ def save_model_on_exit(signal, frame):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None,
-                        help="Path to a YAML config file (defaults built in if omitted)")
+                        help="Path to a YAML config file (default: config/default.yaml)")
     parser.add_argument("--device", type=str, default="auto",
                         help="Torch device to train on: 'auto', 'cuda', or 'cpu' (default: auto)")
     parser.add_argument("--render", action="store_true",
                         help="Render the MuJoCo viewer during training (slower; off by default)")
     args = parser.parse_args()
 
-    config = load_config(args.config)
+    config_path = args.config or "config/default.yaml"
+    config = load_config(config_path)
 
     # Setup signal handlers to catch interruptions
     signal.signal(signal.SIGINT, save_model_on_exit)  # Handle Ctrl+C

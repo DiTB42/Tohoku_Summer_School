@@ -26,11 +26,11 @@ training:
   batch_size: 128
   buffer_size: 9000000
   tau: 0.005
-  gamma: 0.99
+  gamma: 0.95
   ent_coef: auto
   train_freq: [1, step]
   gradient_steps: 1
-  total_timesteps: 100000
+  total_timesteps: 1000000
   log_interval: 4
   tensorboard_log: sac_snake_tensorboard/
   model_save_path: models/sac_snake_final
@@ -47,8 +47,8 @@ env:
   #   omega : oscillation speed (rad/s)
   #   theta : phase shift between joints (rad)
   #   delta : joint offset (0 = straight, nonzero = turn)
-  action_low:  [0.4, 2, 0.2, -0.1]
-  action_high: [0.4, 2, 0.8,  0.1]
+  action_low:  [0.3, 1.5, 0.4, -0.1]
+  action_high: [0.8, 2.5, 1,  0.1]
   # Goal must be at least this many maze cells (Manhattan) from the start,
   # so it never spawns right next to the snake.
   min_goal_distance: 2
