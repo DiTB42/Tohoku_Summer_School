@@ -47,7 +47,7 @@ training:
 env:
   cpg_frequency: 50
   rl_frequency: 0.2
-  max_episode_steps: 250
+  max_episode_steps: 90
   maze_height: 10           # KEEP: corridor-only, see README Limitations
   maze_width: 10
   # 学生課題1 (行動空間 R⁴ 化, docs/STUDENT_TASKS_JP.md): 行動空間は
@@ -56,7 +56,7 @@ env:
   #   omega : oscillation speed (rad/s)
   #   theta : phase shift between joints (rad)
   #   delta : joint offset (0 = straight, nonzero = turn)
-  action_low:  [0.2, 1.7, 0.4, -0.1]
+  action_low:  [0.1, 1.7, 0.4, -0.1]
   action_high: [0.7, 2.3, 1,  0.1]
   # Goal must be at least this many maze cells (Manhattan) from the start,
   # so it never spawns right next to the snake.

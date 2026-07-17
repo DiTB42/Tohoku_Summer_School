@@ -49,6 +49,16 @@ class RewardTermCallback(BaseCallback):
             for key in self.TERMS:
                 if key in info:
                     self.logger.record_mean(f"reward_terms/{key}", info[key])
+            # Log the finish rate (% of episodes that reach the goal) only at
+            # episode boundaries. VecMonitor injects an "episode" key into info
+            # on the step an episode ends; "goal_reached" distinguishes reaching
+            # the goal (terminated) from timing out (truncated). Recorded as a
+            # percentage and averaged over the logging interval.
+            if "episode" in info and "goal_reached" in info:
+                self.logger.record_mean(
+                    "rollout/finish_rate_pct",
+                    100.0 if info["goal_reached"] else 0.0,
+                )
         return True
 import os
 import sys

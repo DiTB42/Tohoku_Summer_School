@@ -395,6 +395,12 @@ class SnakeEnv(gym.Env):
             "raw_r1_proximity": float(r1),
             "raw_r2_closing": float(r2),
             "raw_r3_action_delta": float(r3),
+            # Whether this episode ended by reaching the goal (terminated) vs
+            # timing out at max_episode_steps (truncated). Read at episode end
+            # by RewardTermCallback to log the goal-reached (finish) rate: with
+            # a short max_episode_steps many episodes truncate before finishing,
+            # so ep_rew_mean alone doesn't tell you how often the goal is hit.
+            "goal_reached": bool(terminated),
         }
 
         return self._get_obs(), reward, bool(terminated), bool(truncated), info
