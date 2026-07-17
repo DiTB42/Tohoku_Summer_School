@@ -59,6 +59,16 @@ class RewardTermCallback(BaseCallback):
                     "rollout/finish_rate_pct",
                     100.0 if info["goal_reached"] else 0.0,
                 )
+                # Average episode length over ONLY the episodes that finished
+                # (reached the goal). VecMonitor stores the episode length in
+                # info["episode"]["l"]; the overall ep_len_mean is dominated by
+                # truncated (timed-out) episodes, so this isolates "how many
+                # steps does a successful run take".
+                if info["goal_reached"]:
+                    self.logger.record_mean(
+                        "rollout/finish_ep_len_mean",
+                        float(info["episode"]["l"]),
+                    )
         return True
 import os
 import sys
