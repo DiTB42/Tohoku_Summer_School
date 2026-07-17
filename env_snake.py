@@ -357,9 +357,21 @@ class SnakeEnv(gym.Env):
             )
             scn.ngeom += 1
 
+    def _set_tracking_camera(self):
+        """Make the free camera follow the snake's head automatically, so the
+        snake stays centered without needing to pan the camera with a mouse.
+        Re-applied whenever the viewer is (re)created (once per episode)."""
+        cam = self.viewer.cam
+        cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+        cam.trackbodyid = self.model.body('frame_0-1').id
+        cam.distance = 6.0
+        cam.azimuth = 90.0
+        cam.elevation = -70.0
+
     def render(self):
         if self.viewer is None and self.data is not None:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+            self._set_tracking_camera()
         if self.viewer and self.viewer.is_running():
             self._draw_param_overlay()
             self.viewer.sync()
