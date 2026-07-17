@@ -49,9 +49,16 @@ A* (global planner)  →  SAC (local planner)  →  CPG (gait generator)  →  M
 
 - **`env_snake.py` — `SnakeEnv(gym.Env)`** is the integration hub. One RL `step()` calls the SAC
   action once, then advances the CPG + physics `sim_steps_per_rl_step = int(cpg_frequency / rl_frequency)`
-  times (currently 250). Observation is **34-D**: joint pos(12) + joint vel(12) + head→target vec(3) +
-  head orientation axis-angle(4) + head angular velocity(3). Reward is the paper's 3-term Eq. 12:
+  times (currently 250). Observation is **37-D**: actuated joint pos(12) + actuated joint vel(12) +
+  head→target vec **xy**(2) + head orientation (az, angle)(2) + head angular velocity(3) +
+  heading error (cos, sin)(2) + last action(4). Reward is the paper's 3-term Eq. 12:
   `w_progress·r1 + w_velocity·r2 − w_smoothness·r3` (proximity, closing speed, action-change penalty).
+  **Gotcha:** the snake model interleaves each actuated joint (`Actuator1..12`) with a passive
+  free-spinning wheel joint, so joint state is looked up **by name** (`_resolve_actuated_joints`) —
+  never via `qpos[-12:]`, which mixes in wheels (unbounded angle) and drops the first actuators.
+  The same trap applied to `jnt_range[-12:]` when clipping CPG targets (it zeroed half the actuators);
+  both are now fixed. `last_action` in the obs makes the r3 smoothness penalty Markovian; heading error
+  pre-computes head-forward-vs-target so the policy needn't infer it from world-frame vectors.
 - **`cpg/snake_cpg.py` — `PaperCPG`** integrates the paper's Eq. 9 phase/amplitude dynamics with Euler
   steps and emits `x = r·sin(φ) + δ` per joint. **Critical invariant:** the CPG's `dt` must equal
   `model.opt.timestep`, because `cpg.update()` is called once per `mj_step`. The env recreates the CPG

@@ -42,7 +42,22 @@ class SnakeEnv(gym.Env):
             dtype=np.float32,
         )
 
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(34,), dtype=np.float32)
+        # Number of actuated snake joints (Actuator1..12). The model also has
+        # passive free-spinning wheel joints interleaved with these, so joint
+        # state must be looked up by name, never via a qpos[-12:] slice (see
+        # _resolve_actuated_joints / _get_obs).
+        self.n_actuated = 12
+        act_dim = int(self.action_space.shape[0])
+        # Observation layout (see _get_obs):
+        #   actuated joint pos      : n_actuated (12)
+        #   actuated joint vel      : n_actuated (12)
+        #   head->target vector xy  : 2   (z dropped: planar maze, ~constant)
+        #   head orientation        : 2   (az, angle; ax/ay dropped: ~0 planar)
+        #   head angular velocity   : 3
+        #   heading error (cos, sin): 2   (head-forward vs target dir in xy plane)
+        #   last action             : act_dim (makes the r3 smoothness penalty Markovian)
+        obs_dim = 2 * self.n_actuated + 2 + 2 + 3 + 2 + act_dim
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
         self.maze_layout = create_maze_layout(config.env.maze_height, config.env.maze_width)
         make_maze_on_mujoco(
             load_file_path=self.base_xml_path,
@@ -118,6 +133,9 @@ class SnakeEnv(gym.Env):
         
         self.model = mujoco.MjModel.from_xml_path(self.maze_xml_path)
         self.data = mujoco.MjData(self.model)
+        # The model is rebuilt every reset(), so (re)resolve which qpos/qvel
+        # entries belong to the actuated joints.
+        self._resolve_actuated_joints()
         #self.data.qpos[-12:] = self.init_qpos
         #self.data.qpos[3:7] = np.array([1, 0, 0, 0])
         # Waypoint in world coordinate
@@ -157,6 +175,50 @@ class SnakeEnv(gym.Env):
             elif i < len(self.path_waypoints_world):
                 return self.path_waypoints_world[i]
         return self.goal_pos_world
+    def _resolve_actuated_joints(self):
+        """Cache the qpos/qvel/range addresses of the 12 actuated hinge joints
+        (Actuator1..12).
+
+        The snake model interleaves each actuated joint with a passive,
+        free-spinning wheel joint (frameN-2, axis 0 1 0, unlimited). MuJoCo lays
+        the joints out in DFS order as Actuator_k, wheel_k, Actuator_{k+1}, ...,
+        so a plain qpos[-12:] slice does NOT correspond to the actuated joints:
+        it mixes in wheels (whose angle is an unbounded integrator, hundreds of
+        radians) and silently drops the first actuators. Resolve by name instead."""
+        ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"Actuator{i}")
+               for i in range(1, self.n_actuated + 1)]
+        if any(j < 0 for j in ids):
+            raise RuntimeError("SnakeEnv: could not find all Actuator1..12 joints "
+                               "in the model; check scenes/snake.xml joint names.")
+        self._act_qpos_adr = self.model.jnt_qposadr[ids].copy()
+        self._act_dof_adr = self.model.jnt_dofadr[ids].copy()
+        self._act_jnt_range = self.model.jnt_range[ids].copy()  # (12, 2), each [-3, 3]
+
+    def _get_heading_error(self, head_to_target_vec):
+        """Heading error between the head's forward direction and the direction
+        to the current target, in the ground (xy) plane.
+
+        Returned as (cos e, sin e) rather than the raw angle e to avoid the
+        +/-pi wraparound discontinuity. sin e > 0 means the target is to the
+        snake's LEFT. This pre-computes the "which way do I steer" signal that
+        the policy would otherwise have to infer by combining the world-frame
+        target vector with the head orientation.
+
+        Forward is the head body's local -x axis (the head's initial quat is a
+        180 deg yaw about z), i.e. -xmat[:, 0] in world coordinates."""
+        R = self.data.body('frame_0-1').xmat.reshape(3, 3)
+        fwd_xy = (-R[:, 0])[:2]
+        tgt_xy = head_to_target_vec[:2]
+        fn = np.linalg.norm(fwd_xy)
+        tn = np.linalg.norm(tgt_xy)
+        if fn < 1e-9 or tn < 1e-9:
+            return np.array([1.0, 0.0])  # degenerate (target under head): treat as aligned
+        fwd_xy = fwd_xy / fn
+        tgt_xy = tgt_xy / tn
+        cos_e = float(np.dot(fwd_xy, tgt_xy))
+        sin_e = float(fwd_xy[0] * tgt_xy[1] - fwd_xy[1] * tgt_xy[0])  # 2D cross; + = left
+        return np.array([cos_e, sin_e])
+
     def _get_head_orientation_axis_angle(self):
         """Axis-angle representation (axis(3) + angle(1)) of the head's world
         orientation, analogous to the paper's relative-orientation state."""
@@ -175,16 +237,24 @@ class SnakeEnv(gym.Env):
         return self.data.body('frame_0-1').cvel[:3]
 
     def _get_obs(self):
-        joint_pos = self.data.qpos[-12:]
-        joint_vel = self.data.qvel[-12:]
+        joint_pos = self.data.qpos[self._act_qpos_adr]      # 12 actuated joint angles
+        joint_vel = self.data.qvel[self._act_dof_adr]       # 12 actuated joint velocities
         head_pos = self.data.body('frame_0-1').xpos
         current_target = self._get_current_target()
         head_to_target_vec = current_target - head_pos
-        head_orientation = self._get_head_orientation_axis_angle()
+        # Planar maze: the z component of the head->target vector is ~constant
+        # (both pinned near z=0.15), so keep only the (x, y) offset.
+        head_to_target_xy = head_to_target_vec[:2]
+        # Head orientation as axis-angle; for planar motion the rotation axis is
+        # ~vertical (ax, ay ~ 0), so keep only the z-axis component and the angle.
+        head_orientation = self._get_head_orientation_axis_angle()  # [ax, ay, az, angle]
+        orient_z_angle = head_orientation[2:]                       # [az, angle]
         head_angular_vel = self._get_head_angular_velocity()
+        heading_error = self._get_heading_error(head_to_target_vec)  # [cos e, sin e]
 
         obs = np.concatenate([
-            joint_pos, joint_vel, head_to_target_vec, head_orientation, head_angular_vel
+            joint_pos, joint_vel, head_to_target_xy, orient_z_angle,
+            head_angular_vel, heading_error, np.ravel(self.last_action)
         ]).astype(np.float32)
 
 
@@ -219,10 +289,15 @@ class SnakeEnv(gym.Env):
         head_pos = self.data.body('frame_0-1').xpos
         distance_to_waypoint = np.linalg.norm(current_target - head_pos)
 
-        joint_range = self.model.jnt_range[-12:]
+        # Clip the 12 CPG targets to the actuated joints' ranges. NOTE: use the
+        # by-name actuator ranges, NOT jnt_range[-12:] — the latter is interleaved
+        # with unlimited wheel joints whose range is [0, 0], which would clamp
+        # half the actuator targets to zero and cripple the gait.
+        act_lo = self._act_jnt_range[:, 0]
+        act_hi = self._act_jnt_range[:, 1]
         for _ in range(self.sim_steps_per_rl_step):
             target_positions = self.cpg.update()
-            clipped_targets = np.clip(target_positions, joint_range[:, 0], joint_range[:, 1])
+            clipped_targets = np.clip(target_positions, act_lo, act_hi)
             self.data.ctrl[:] = clipped_targets
 
             mujoco.mj_step(self.model, self.data)
@@ -277,7 +352,9 @@ class SnakeEnv(gym.Env):
         reward = term_progress + term_velocity - term_smoothness
 
         truncated = self.current_step >= self.max_episode_steps
-        self.last_action = action
+        # Stored as a flat float32 vector: it is fed back into the observation
+        # (see _get_obs) so the policy can see the action it just took.
+        self.last_action = np.asarray(action, dtype=np.float32).ravel()
 
         # Expose the per-term breakdown so training can log/monitor the balance
         # between the three reward components (see RewardTermCallback in
