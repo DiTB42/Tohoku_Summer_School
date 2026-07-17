@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import mujoco
 import mujoco.viewer
+import os
 import time
 from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar
 from mazes.mujoco_tools import make_maze_on_mujoco
@@ -12,7 +13,8 @@ from config_utils import load_config
 class SnakeEnv(gym.Env):
     metadata = {'render_modes': ['human'], 'render_fps': 50}
 
-    def __init__(self, render_mode=None, config=None, render_slowdown=None):
+    def __init__(self, render_mode=None, config=None, render_slowdown=None,
+                 env_index=None, maze_xml_path=None):
         super(SnakeEnv, self).__init__()
 
         if config is None:
@@ -30,7 +32,23 @@ class SnakeEnv(gym.Env):
         self.start_pos_maze = (1, 1)
         #self.init_qpos = np.zeros(12, dtype=np.float32)
         self.base_xml_path = 'scenes/scene.xml'
-        self.maze_xml_path = 'scenes/scene_maze_trial.xml'
+        # The generated maze XML must live in scenes/ because it <include>s
+        # snake.xml via a path relative to its own directory. For parallel
+        # (SubprocVecEnv / DummyVecEnv) training every env needs a UNIQUE output
+        # file, or workers clobber each other's XML mid-write. Resolution order:
+        #   1. explicit maze_xml_path arg;
+        #   2. env_index set -> scenes/scene_maze_env{index}_{pid}.xml
+        #      (index disambiguates DummyVecEnv, pid disambiguates SubprocVecEnv
+        #      workers and concurrent training runs). Built HERE in __init__ so
+        #      os.getpid() is the worker's pid under spawn, not the parent's;
+        #   3. default shared path (single-env / test_model.py, unchanged).
+        self._env_index = env_index
+        if maze_xml_path is not None:
+            self.maze_xml_path = maze_xml_path
+        elif env_index is not None:
+            self.maze_xml_path = f'scenes/scene_maze_env{env_index}_{os.getpid()}.xml'
+        else:
+            self.maze_xml_path = 'scenes/scene_maze_trial.xml'
 
 
         # 学生課題1: 行動空間 R⁴ = (R, ω, θ, δ). 各成分の low/high は
@@ -462,6 +480,14 @@ class SnakeEnv(gym.Env):
     def close(self):
         if self.viewer:
             self.viewer.close()
+        # Remove this env's per-index maze XML so scenes/ doesn't accumulate
+        # one file per worker per run. Only touch files we own (env_index set);
+        # never delete the shared default used by single-env / test_model.py.
+        if self._env_index is not None:
+            try:
+                os.remove(self.maze_xml_path)
+            except OSError:
+                pass
             self.viewer = None
 
 

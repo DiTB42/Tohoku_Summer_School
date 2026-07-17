@@ -25,6 +25,7 @@ uv pip install -r requirements.txt
 
 uv run python train_sac.py                              # train SAC (config/default.yaml, device auto)
 uv run python train_sac.py --config config/best_training.yaml --device cpu --render
+uv run python train_sac.py --n-envs 8                    # CPU-parallel training (SubprocVecEnv, 8 workers)
 uv run python test_model.py                             # roll out models/sac_snake_final.zip in the viewer
 uv run python test_model.py models/checkpoints/sac_snake_20000_steps.zip --episodes 3 --render-slowdown 4
 uv run python cpg/snake_cpg.py                          # CPG-only sanity check (no RL) — snake should crawl forward
@@ -35,8 +36,21 @@ There is no test suite, linter, or build step — "testing" means running the CP
 a short training run, and a viewer rollout, then inspecting TensorBoard.
 
 **Windows-only:** `train_sac.py` calls `ctypes.windll.kernel32.SetThreadExecutionState` (keeps the
-machine awake during long training). This import-time call will fail on non-Windows platforms; guard
-or remove it if running elsewhere.
+machine awake during long training). This call runs inside the `if __name__ == "__main__"` guard so
+it does not re-fire in spawned worker processes; it will fail on non-Windows platforms, so guard or
+remove it if running elsewhere.
+
+**Parallel training (`--n-envs N` / `training.n_envs`):** the bottleneck is CPU physics (250
+`mj_step` per RL step), not the tiny `[64,64]` MLP, and the installed torch is CPU-only — so speedup
+comes from `SubprocVecEnv`, not CUDA. `n_envs=1` uses `DummyVecEnv` (original single-env behavior);
+`n_envs>1` runs one MuJoCo sim per subprocess. Key wiring in `train_sac.py`: the env is always
+`VecMonitor`-wrapped (needed for `rollout/ep_rew_mean`), `gradient_steps` is multiplied by `n_envs`
+to keep one update per collected transition, and `CheckpointCallback.save_freq` is `2000 // n_envs`
+(SB3 counts vec-steps). **Gotcha:** each `SnakeEnv` must write a *unique* maze XML — `SnakeEnv(...,
+env_index=i)` produces `scenes/scene_maze_env{i}_{pid}.xml` (cleaned up in `close()`); the shared
+default `scenes/scene_maze_trial.xml` (env_index=None) is what single-env / `test_model.py` use. N
+workers sharing one file would clobber each other mid-write → NaN/corrupt-load crashes. Parallel
+training is headless (`--render` is ignored when `n_envs>1`).
 
 ## Architecture: hierarchical control loop
 

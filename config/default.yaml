@@ -30,6 +30,10 @@ training:
   ent_coef: auto
   train_freq: [1, step]
   gradient_steps: 1
+  # Parallel environments for data collection (SubprocVecEnv). 1 = single-env
+  # (original behavior). Set to ~8 on this machine, or pass --n-envs 8, for
+  # CPU-parallel training. gradient_steps is auto-scaled by n_envs at runtime.
+  n_envs: 1
   total_timesteps: 1000000
   log_interval: 4
   tensorboard_log: sac_snake_tensorboard/

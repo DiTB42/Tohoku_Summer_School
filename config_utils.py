@@ -41,6 +41,11 @@ class TrainingConfig:
     ent_coef: str = "auto"
     train_freq: list = None
     gradient_steps: int = 1
+    # Number of parallel environments (SubprocVecEnv) for data collection.
+    # 1 = single-env DummyVecEnv (original behavior). The CLI --n-envs overrides
+    # this. gradient_steps is multiplied by n_envs at train time to keep one
+    # gradient update per collected transition (see train_sac.py).
+    n_envs: int = 1
     total_timesteps: int = 10000
     log_interval: int = 4
     tensorboard_log: str = "sac_snake_tensorboard/"
