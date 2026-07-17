@@ -185,12 +185,12 @@ class SnakeEnv(gym.Env):
         return self._get_obs(), {}
     def _get_current_target(self):
         if self.path_waypoints_world:
-            i = self.current_waypoint_index
-            """if i < len(self.path_waypoints_world) - 1:
-                w1 = self.path_waypoints_world[i]
-                w2 = self.path_waypoints_world[i + 1]
-                return 0.5 * (w1 + w2)
-            elif i < len(self.path_waypoints_world):"""
+            # Clamp: once the final waypoint (== goal) is reached,
+            # current_waypoint_index advances to len(path_waypoints_world) on the
+            # same step that sets terminated=True. That terminated step still calls
+            # _get_obs()->_get_current_target(), so an unclamped index would raise
+            # IndexError before the episode can return. Keep pointing at the goal.
+            i = min(self.current_waypoint_index, len(self.path_waypoints_world) - 1)
             return self.path_waypoints_world[i]
         return self.goal_pos_world
     def _resolve_actuated_joints(self):
