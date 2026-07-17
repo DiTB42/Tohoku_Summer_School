@@ -6,10 +6,15 @@
 reward:
   # 論文 (式12) の報酬は r1/r2/r3 の3項のみ。下の3重みは「学生が設計・調整する対象」
   # (docs/STUDENT_TASKS_JP.md 課題2)。r3 は罰則なので env 側で減算している。
-  w_progress: 0          # r1: weight of 1/(0.1+distance)  (proximity)
-  w_velocity: 200.0         # r2: weight of closing speed
-  w_smoothness: 0         # r3: weight of action-change penalty (subtracted)
+  w_progress: 0           # r1: weight of 1/(0.1+distance)  (proximity attractor)
+  w_velocity: 50.0          # r2: weight of closing speed (reduced so it no longer dominates)
+  w_smoothness: 0         # r3: weight of action-change penalty (subtracted) → smoother gait
   waypoint_threshold: 0.4   # distance under which a waypoint/goal counts as reached
+  # DELIBERATE DIVERGENCE from paper eq.(12) — reward reaching the goal, fast.
+  # Guardrail: w_goal must stay >> time_penalty * max_episode_steps (0.05*250=12.5)
+  # so stalling/crashing never beats finishing.
+  w_goal: 100.0             # one-shot terminal bonus for reaching the goal
+  time_penalty: 0.05        # per-step living cost → rewards finishing fast
 
 cpg:
   frequency_hz: 50.0        # CPG update frequency for standalone use (dt = 1/frequency_hz)

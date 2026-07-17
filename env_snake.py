@@ -328,7 +328,7 @@ class SnakeEnv(gym.Env):
         new_head_pos = self.data.body('frame_0-1').xpos
         new_distance_to_waypoint = np.linalg.norm(current_target - new_head_pos)
         r2 = distance_to_waypoint - new_distance_to_waypoint
-
+        r2 = np.sign(r2) * r2 * r2
         # Waypoint "reached" is judged against the waypoint's own world
         # coordinates, not the lookahead midpoint used for reward shaping.
         # (Only the waypoint-index advancement is kept here; the one-shot
@@ -367,7 +367,15 @@ class SnakeEnv(gym.Env):
         term_progress = reward_cfg.w_progress * r1
         term_velocity = reward_cfg.w_velocity * r2
         term_smoothness = reward_cfg.w_smoothness * r3  # penalty (subtracted below)
-        reward = term_progress + term_velocity - term_smoothness
+        # DELIBERATE DIVERGENCE from the paper's eq.(12) (see RewardConfig):
+        #   term_goal: one-shot terminal bonus for reaching the goal. Combined
+        #     with gamma<1 this makes finishing SOONER worth more, i.e. it is
+        #     what actually rewards speed (r2 alone only rewards net progress).
+        #   term_time: per-step living cost, a direct pressure to finish fast.
+        term_goal = reward_cfg.w_goal * (1.0 if terminated else 0.0)
+        term_time = reward_cfg.time_penalty  # subtracted every step
+        reward = (term_progress + term_velocity - term_smoothness
+                  + term_goal - term_time)
 
         truncated = self.current_step >= self.max_episode_steps
         # Stored as a flat float32 vector: it is fed back into the observation
@@ -382,6 +390,8 @@ class SnakeEnv(gym.Env):
             "term_progress": float(term_progress),
             "term_velocity": float(term_velocity),
             "term_smoothness": float(term_smoothness),
+            "term_goal": float(term_goal),
+            "term_time": float(-term_time),  # stored signed, since it is a penalty
             "raw_r1_proximity": float(r1),
             "raw_r2_closing": float(r2),
             "raw_r3_action_delta": float(r3),

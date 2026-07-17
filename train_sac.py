@@ -37,6 +37,8 @@ class RewardTermCallback(BaseCallback):
         "term_progress",
         "term_velocity",
         "term_smoothness",
+        "term_goal",
+        "term_time",
         "raw_r1_proximity",
         "raw_r2_closing",
         "raw_r3_action_delta",

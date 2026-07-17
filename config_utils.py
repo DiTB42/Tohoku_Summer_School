@@ -17,6 +17,15 @@ class RewardConfig:
     w_velocity: float = 200.0
     w_smoothness: float = 1.0
     waypoint_threshold: float = 0.7
+    # DELIBERATE DIVERGENCE from the paper's eq.(12): a terminal goal bonus and
+    # a per-step time penalty. The paper (and this repo's reduced reward) grant
+    # no explicit reward for reaching the goal, which gives no incentive to
+    # actually finish — or to finish fast. w_goal rewards crossing the line
+    # (and, via gamma<1 discounting, finishing sooner); time_penalty is a living
+    # cost that directly pressures the policy to be quick. Guardrail: keep
+    # w_goal >> time_penalty * max_episode_steps to avoid "give-up" behavior.
+    w_goal: float = 100.0        # one-shot terminal bonus granted on reaching the goal
+    time_penalty: float = 0.05   # per-step living cost (subtracted every RL step)
 
 
 @dataclass
