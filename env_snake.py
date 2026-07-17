@@ -12,7 +12,7 @@ from config_utils import load_config
 class SnakeEnv(gym.Env):
     metadata = {'render_modes': ['human'], 'render_fps': 50}
 
-    def __init__(self, render_mode=None, config=None):
+    def __init__(self, render_mode=None, config=None, render_slowdown=None):
         super(SnakeEnv, self).__init__()
 
         if config is None:
@@ -65,7 +65,11 @@ class SnakeEnv(gym.Env):
         # Playback speed for the human viewer. 1.0 = real physics time
         # (each substep drawn and paused by one physics timestep). Increase
         # to slow the animation down further (e.g. 4.0 = 4x slower).
-        self.render_slowdown = 2.0
+        # Resolution order: explicit render_slowdown arg > config value > 2.0.
+        if render_slowdown is not None:
+            self.render_slowdown = render_slowdown
+        else:
+            self.render_slowdown = getattr(config.env, "render_slowdown", 2.0)
         # Current CPG parameters, shown as a text overlay in the viewer.
         self._display_params = {"R": self.R, "omega": self.omega,
                                 "theta": 0.0, "delta": self.delta}

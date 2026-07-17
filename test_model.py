@@ -16,6 +16,11 @@ if __name__ == "__main__":
                              "Default: config/default.yaml")
     parser.add_argument("--episodes", type=int, default=5,
                         help="Number of episodes to run (default: 5)")
+    parser.add_argument("--render-slowdown", type=float, default=None,
+                        help="Playback speed for the viewer. 1.0 = real "
+                             "physics time; larger = slower (e.g. 4.0 = 4x "
+                             "slower), smaller = faster. If omitted, uses the "
+                             "config value or the env default (2.0).")
     args = parser.parse_args()
 
     # Load the model
@@ -24,7 +29,8 @@ if __name__ == "__main__":
     # Create the environment in rendering mode, using the same config the
     # model was trained with (maze size, frequencies, reward, ...).
     config = load_config(args.config)
-    env = SnakeEnv(render_mode="human", config=config)
+    env = SnakeEnv(render_mode="human", config=config,
+                   render_slowdown=args.render_slowdown)
     n_episodes = args.episodes
 
     for ep in range(n_episodes):

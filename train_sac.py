@@ -4,7 +4,14 @@ from env_snake import SnakeEnv
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+import ctypes
 
+ES_CONTINUOUS = 0x80000000
+ES_SYSTEM_REQUIRED = 0x00000001
+
+ctypes.windll.kernel32.SetThreadExecutionState(
+    ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+)
 
 class RewardTermCallback(BaseCallback):
     """Logs the per-term reward breakdown (from env info dicts) to TensorBoard

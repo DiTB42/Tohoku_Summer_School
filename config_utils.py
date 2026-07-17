@@ -65,6 +65,10 @@ class EnvConfig:
     # Minimum Manhattan distance (in maze cells) between the snake's start
     # and the randomly chosen goal, so the goal never spawns right next to it.
     min_goal_distance: int = 2
+    # Playback speed for the human viewer. 1.0 = real physics time; larger =
+    # slower (e.g. 4.0 = 4x slower), smaller = faster. Overridable per-run via
+    # the --render-slowdown CLI arg in test_model.py.
+    render_slowdown: float = 2.0
 
     def __post_init__(self):
         if self.action_low is None:
