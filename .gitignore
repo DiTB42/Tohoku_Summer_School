@@ -8,7 +8,9 @@ __pycache__/
 venv/
 env/
 ENV/
-
+# Per-worker parallel-training maze files (scene_maze_env{i}_{pid}.xml);
+# keep scene_maze_trial.xml and scene_maze.xml tracked.
+/scenes/scene_maze_env*.xml
 # Packaging / build
 build/
 dist/

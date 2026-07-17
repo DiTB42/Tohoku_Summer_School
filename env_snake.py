@@ -186,12 +186,12 @@ class SnakeEnv(gym.Env):
     def _get_current_target(self):
         if self.path_waypoints_world:
             i = self.current_waypoint_index
-            if i < len(self.path_waypoints_world) - 1:
+            """if i < len(self.path_waypoints_world) - 1:
                 w1 = self.path_waypoints_world[i]
                 w2 = self.path_waypoints_world[i + 1]
                 return 0.5 * (w1 + w2)
-            elif i < len(self.path_waypoints_world):
-                return self.path_waypoints_world[i]
+            elif i < len(self.path_waypoints_world):"""
+            return self.path_waypoints_world[i]
         return self.goal_pos_world
     def _resolve_actuated_joints(self):
         """Cache the qpos/qvel/range addresses of the 12 actuated hinge joints

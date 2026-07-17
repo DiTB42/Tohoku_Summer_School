@@ -6,10 +6,10 @@
 reward:
   # 論文 (式12) の報酬は r1/r2/r3 の3項のみ。下の3重みは「学生が設計・調整する対象」
   # (docs/STUDENT_TASKS_JP.md 課題2)。r3 は罰則なので env 側で減算している。
-  w_progress: 15.0          # r1: weight of 1/(0.1+distance)  (proximity)
+  w_progress: 0          # r1: weight of 1/(0.1+distance)  (proximity)
   w_velocity: 200.0         # r2: weight of closing speed
-  w_smoothness: 1.0         # r3: weight of action-change penalty (subtracted)
-  waypoint_threshold: 0.7   # distance under which a waypoint/goal counts as reached
+  w_smoothness: 0         # r3: weight of action-change penalty (subtracted)
+  waypoint_threshold: 0.4   # distance under which a waypoint/goal counts as reached
 
 cpg:
   frequency_hz: 50.0        # CPG update frequency for standalone use (dt = 1/frequency_hz)
@@ -51,7 +51,7 @@ env:
   #   omega : oscillation speed (rad/s)
   #   theta : phase shift between joints (rad)
   #   delta : joint offset (0 = straight, nonzero = turn)
-  action_low:  [0.4, 1.7, 0.4, -0.1]
+  action_low:  [0.2, 1.7, 0.4, -0.1]
   action_high: [0.7, 2.3, 1,  0.1]
   # Goal must be at least this many maze cells (Manhattan) from the start,
   # so it never spawns right next to the snake.
