@@ -30,6 +30,12 @@ uv run python test_model.py                             # roll out models/sac_sn
 uv run python test_model.py models/checkpoints/sac_snake_20000_steps.zip --episodes 3 --render-slowdown 4
 uv run python cpg/snake_cpg.py                          # CPG-only sanity check (no RL) — snake should crawl forward
 uv run tensorboard --logdir sac_snake_tensorboard/      # monitor training (localhost:6006)
+
+# Multi-snake swarm visualization (presentation tool; live viewer, distinct color per snake)
+uv run python viz_stochastic.py models/checkpoints/sac_snake_1000000_steps.zip --n 20 --seed 1
+uv run python viz_checkpoints.py CKPT1.zip CKPT2.zip CKPT3.zip --seed 1   # one snake per checkpoint
+uv run python viz_checkpoints.py --glob "models/checkpoints/sac_snake_*_steps.zip" --pick 1000,10000,100000,1000000
+#   add --no-render for a headless sanity check; PowerShell line-continuation is ` (backtick), NOT \
 ```
 
 There is no test suite, linter, or build step — "testing" means running the CPG sanity check,
@@ -95,6 +101,43 @@ The maze XML is **generated at runtime, not authored by hand**:
   change to survive. Edit `scene.xml` / `snake.xml` or the generator instead.
 - The snake **head body is named `frame_0-1`** — used throughout `env_snake.py` for head position,
   orientation, angular velocity, and the tracking camera.
+
+## Multi-snake swarm visualization (`swarm_core.py` + `viz_*.py`)
+
+A **standalone presentation tool**, independent of the training pipeline (does NOT touch
+`env_snake.py` / `train_sac.py` / `test_model.py`). It runs many snakes of trained policies in
+**one shared maze, one physics loop, one live viewer**, each a distinct color.
+
+- **`swarm_core.py`** — the engine. `SnakeSwarm` assembles ONE `MjModel` containing N snakes by
+  ElementTree surgery (same idiom as `make_maze_on_mujoco`): every snake gets an `s{k:02d}_` name
+  prefix (snake.xml's names — `frame_0-1`, `Actuator1..12`, camera, light — are hard-coded and would
+  otherwise collide), and the copies are merged into a maze scene built from **`scenes/scene_nosnake.xml`**.
+  `SnakeState` holds per-snake handles (by prefixed name), a `PaperCPG`, and rollout state.
+- **`viz_stochastic.py`** — N snakes from ONE checkpoint, `deterministic=False` (SAC samples), so they
+  fan out and show the policy's behavior spread. Shared policy → obs are batched in one `predict()`.
+- **`viz_checkpoints.py`** — one snake per checkpoint (labels like `1k`/`10k`/`1M`), `deterministic=True`,
+  showing training progression. `--glob`/`--pick` picks step counts; paths are validated up front.
+
+Key gotchas / invariants (mirror or diverge from `SnakeEnv` deliberately):
+- **`scenes/scene_nosnake.xml`** is `scene.xml` WITHOUT the `<include file="snake.xml"/>` (swarm injects
+  its own snakes). It duplicates the `compiler angle="radian"`, `option integrator="implicitfast"`, and
+  `<default><geom friction=...>` that snake.xml normally contributes via the include — **without
+  `angle="radian"` the CPG's radian targets are read as degrees and the gait breaks.**
+- **Snake↔snake collisions are disabled** by setting every snake geom `contype="2" conaffinity="1"`
+  (env/walls stay default `1/1`): bitmask `snake-snake (2&1)|(2&1)=0`, `snake-floor (2&1)|(1&1)=1`.
+  Side effect: each snake's own non-adjacent self-collisions are also off (minor for a thin chain).
+  This lets all N snakes share the start cell (world origin) without interpenetrating.
+- **Observation width auto-adapts per policy.** `SnakeState` reads `policy.observation_space` and builds
+  either the full **37-D** obs or the older **34-D** obs (which omits the 3-D head angular-velocity
+  block). Saved checkpoints come from both eras — e.g. `sac_snake_1000_steps.zip`/`best_model.zip` are
+  34-D, `sac_snake_final.zip` and later checkpoints are 37-D — and can be mixed in one `viz_checkpoints`
+  run. Action is always 4-D `(R,ω,θ,δ)`; scalar-θ (1-D) policies are rejected. Actions are clipped to
+  each policy's own `action_space` bounds (they differ per checkpoint).
+- The obs math in `SnakeState.get_obs` is a **hand-copy of `env_snake._get_obs`** — keep them in sync if
+  the obs layout changes.
+- Generated XML (combined scene + intermediate maze) is written to a **scratch dir**, not `scenes/`, so
+  it does not pollute git. Camera is a fixed top-down free camera framing the whole maze (not the env's
+  per-head tracking). `--no-render` runs headless (no viewer, no real-time sleep) for smoke tests.
 
 ## Key conventions
 
