@@ -218,9 +218,12 @@ class SnakeState:
         self.head_name = f"{prefix}frame_0-1"
 
         # Adapt the observation layout to THIS policy's obs space. Checkpoints in
-        # this repo come from two eras (see docs / README student-task 1):
-        #   * 37-D obs: full layout incl. the 3-D head angular velocity block.
-        #   * 34-D obs: older layout WITHOUT the angular-velocity block.
+        # this repo come from three eras (see docs / README student-task 1):
+        #   * 34-D obs: oldest layout, WITHOUT the head angular-velocity block.
+        #   * 37-D obs: adds the 3-D head angular velocity block.
+        #   * 38-D obs: also adds the 1-D next-turn signal (turn AT the next
+        #     waypoint: +1 left / -1 right / 0 straight), inserted between the
+        #     heading error and last_action.
         # Every checkpoint here uses a 4-D action (R, omega, theta, delta); the
         # scalar-theta era (act_dim=1) is not supported by the CPG mapping below.
         self.act_low = np.asarray(model_policy.action_space.low, dtype=np.float32)
@@ -232,15 +235,18 @@ class SnakeState:
                 f"but only the 4-D (R,omega,theta,delta) action space is supported.")
         obs_dim = int(model_policy.observation_space.shape[0])
         base_no_angvel = 2 * self.N_ACT + 2 + 2 + 2 + self.act_dim  # 34 for act=4
-        if obs_dim == base_no_angvel + 3:
-            self.include_angvel = True
-        elif obs_dim == base_no_angvel:
-            self.include_angvel = False
-        else:
+        # (include_angvel, include_next_turn) keyed by total obs width.
+        _layouts = {
+            base_no_angvel: (False, False),          # 34
+            base_no_angvel + 3: (True, False),        # 37
+            base_no_angvel + 3 + 1: (True, True),     # 38
+        }
+        if obs_dim not in _layouts:
             raise RuntimeError(
                 f"swarm_core: policy for {label!r} has obs dim {obs_dim}, "
-                f"expected {base_no_angvel} or {base_no_angvel + 3}; obs layout "
+                f"expected one of {sorted(_layouts)}; obs layout "
                 f"does not match env_snake._get_obs.")
+        self.include_angvel, self.include_next_turn = _layouts[obs_dim]
 
         # Resolve actuated joint qpos/dof/range addresses by prefixed name,
         # exactly like SnakeEnv._resolve_actuated_joints (never a qpos slice:
@@ -309,6 +315,22 @@ class SnakeState:
             return path_world[i]
         return goal_world
 
+    def _next_turn_signal(self, path_world):
+        """Mirror of env_snake.SnakeEnv._get_next_turn_signal: turn AT the next
+        waypoint via the signed 2D cross of incoming (B-A) and outgoing (B->C)
+        directions. +1 left / -1 right / 0 straight (or ends of path)."""
+        if not path_world or len(path_world) < 3:
+            return 0.0
+        b = min(self.waypoint_index, len(path_world) - 1)
+        if b - 1 < 0 or b + 1 > len(path_world) - 1:
+            return 0.0
+        inc = (path_world[b] - path_world[b - 1])[:2]
+        out = (path_world[b + 1] - path_world[b])[:2]
+        cross = inc[0] * out[1] - inc[1] * out[0]
+        if abs(cross) < 1e-6:
+            return 0.0
+        return 1.0 if cross > 0 else -1.0
+
     def get_obs(self, data, path_world, goal_world):
         joint_pos = data.qpos[self.qpos_adr]
         joint_vel = data.qvel[self.dof_adr]
@@ -321,7 +343,10 @@ class SnakeState:
         parts = [joint_pos, joint_vel, head_to_target_xy, orient]
         if self.include_angvel:
             parts.append(data.body(self.head_name).cvel[:3])  # head angular velocity
-        parts += [heading_err, np.ravel(self.last_action)]
+        parts.append(heading_err)
+        if self.include_next_turn:
+            parts.append([self._next_turn_signal(path_world)])  # +1 L / -1 R / 0 straight
+        parts.append(np.ravel(self.last_action))
         obs = np.concatenate(parts).astype(np.float32)
         return np.clip(obs, -1000.0, 1000.0)
 

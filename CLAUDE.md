@@ -71,9 +71,13 @@ A* (global planner)  →  SAC (local planner)  →  CPG (gait generator)  →  M
 
 - **`env_snake.py` — `SnakeEnv(gym.Env)`** is the integration hub. One RL `step()` calls the SAC
   action once, then advances the CPG + physics `sim_steps_per_rl_step = int(cpg_frequency / rl_frequency)`
-  times (currently 250). Observation is **37-D**: actuated joint pos(12) + actuated joint vel(12) +
+  times (currently 250). Observation is **38-D**: actuated joint pos(12) + actuated joint vel(12) +
   head→target vec **xy**(2) + head orientation (az, angle)(2) + head angular velocity(3) +
-  heading error (cos, sin)(2) + last action(4). Reward is the paper's 3-term Eq. 12:
+  heading error (cos, sin)(2) + next-turn signal(1) + last action(4). The next-turn signal
+  (`_get_next_turn_signal`) is the turn the A* path makes AT the next waypoint — signed 2D cross of
+  incoming (B−A) vs outgoing (B→C) directions: +1 left, −1 right, 0 straight (same +=left convention
+  as heading error). Waypoints are dense (one per cell) so it is 0 along corridors and flips to ±1
+  ~one cell before a corner. Reward is the paper's 3-term Eq. 12:
   `w_progress·r1 + w_velocity·r2 − w_smoothness·r3` (proximity, closing speed, action-change penalty).
   **Gotcha:** the snake model interleaves each actuated joint (`Actuator1..12`) with a passive
   free-spinning wheel joint, so joint state is looked up **by name** (`_resolve_actuated_joints`) —
@@ -130,10 +134,11 @@ Key gotchas / invariants (mirror or diverge from `SnakeEnv` deliberately):
   Side effect: each snake's own non-adjacent self-collisions are also off (minor for a thin chain).
   This lets all N snakes share the start cell (world origin) without interpenetrating.
 - **Observation width auto-adapts per policy.** `SnakeState` reads `policy.observation_space` and builds
-  either the full **37-D** obs or the older **34-D** obs (which omits the 3-D head angular-velocity
-  block). Saved checkpoints come from both eras — e.g. `sac_snake_1000_steps.zip`/`best_model.zip` are
-  34-D, `sac_snake_final.zip` and later checkpoints are 37-D — and can be mixed in one `viz_checkpoints`
-  run. Action is always 4-D `(R,ω,θ,δ)`; scalar-θ (1-D) policies are rejected. Actions are clipped to
+  either the full **38-D** obs, the **37-D** obs (omits the 1-D next-turn signal), or the older
+  **34-D** obs (also omits the 3-D head angular-velocity block). Saved checkpoints come from all three
+  eras — e.g. `sac_snake_1000_steps.zip`/`best_model.zip` are 34-D, `sac_snake_final.zip` is 37-D, and
+  checkpoints trained after the next-turn signal was added are 38-D — and can be mixed in one
+  `viz_checkpoints` run. Action is always 4-D `(R,ω,θ,δ)`; scalar-θ (1-D) policies are rejected. Actions are clipped to
   each policy's own `action_space` bounds (they differ per checkpoint).
 - The obs math in `SnakeState.get_obs` is a **hand-copy of `env_snake._get_obs`** — keep them in sync if
   the obs layout changes.

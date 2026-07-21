@@ -80,8 +80,9 @@ class SnakeEnv(gym.Env):
         #   head orientation        : 2   (az, angle; ax/ay dropped: ~0 planar)
         #   head angular velocity   : 3
         #   heading error (cos, sin): 2   (head-forward vs target dir in xy plane)
+        #   next-turn signal        : 1   (turn AT the next waypoint: +1 left, -1 right, 0 straight)
         #   last action             : act_dim (makes the r3 smoothness penalty Markovian)
-        obs_dim = 2 * self.n_actuated + 2 + 2 + 3 + 2 + act_dim
+        obs_dim = 2 * self.n_actuated + 2 + 2 + 3 + 2 + 1 + act_dim
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
         self.maze_layout = create_maze_layout(config.env.maze_height, config.env.maze_width)
         make_maze_on_mujoco(
@@ -247,6 +248,39 @@ class SnakeEnv(gym.Env):
         sin_e = float(fwd_xy[0] * tgt_xy[1] - fwd_xy[1] * tgt_xy[0])  # 2D cross; + = left
         return np.array([cos_e, sin_e])
 
+    def _get_next_turn_signal(self):
+        """Which way the path bends AT the next waypoint the snake is heading for.
+
+        Let B be the waypoint currently being approached (current_waypoint_index),
+        A the waypoint it came from (B-1) and C the one after (B+1). The turn at B
+        is the signed 2D cross product of the incoming direction (B-A) and the
+        outgoing direction (C-B), taken in the ground (xy) plane:
+
+            +1  the path turns LEFT at B  (cross > 0)
+            -1  the path turns RIGHT at B (cross < 0)
+             0  straight through B (collinear), or no turn is defined yet
+
+        Note cross((B-A),(C-B)) == cross((B-A),(C-A)) since (B-A)x(B-A)=0, so this
+        is exactly the "A->C projected onto A->B" idea. Sign convention matches
+        _get_heading_error (+ = left). Returns 0 at the ends of the path (no A when
+        B is the start, no C when B is the goal). Because the A* waypoints are dense
+        (one per cell), this is 0 along straight corridors and flips to +/-1 only on
+        the cell whose next waypoint is the corner itself (~one cell of lookahead)."""
+        wps = self.path_waypoints_world
+        if len(wps) < 3:
+            return 0.0
+        # B is the current target; clamp like _get_current_target (index can equal
+        # len(wps) on the terminated step).
+        b = min(self.current_waypoint_index, len(wps) - 1)
+        if b - 1 < 0 or b + 1 > len(wps) - 1:
+            return 0.0  # B is the start (no A) or the goal (no C): no turn to signal
+        inc = (wps[b] - wps[b - 1])[:2]      # A -> B
+        out = (wps[b + 1] - wps[b])[:2]      # B -> C
+        cross = inc[0] * out[1] - inc[1] * out[0]
+        if abs(cross) < 1e-6:
+            return 0.0  # collinear -> straight
+        return 1.0 if cross > 0 else -1.0
+
     def _get_head_orientation_axis_angle(self):
         """Axis-angle representation (axis(3) + angle(1)) of the head's world
         orientation, analogous to the paper's relative-orientation state."""
@@ -279,10 +313,11 @@ class SnakeEnv(gym.Env):
         orient_z_angle = head_orientation[2:]                       # [az, angle]
         head_angular_vel = self._get_head_angular_velocity()
         heading_error = self._get_heading_error(head_to_target_vec)  # [cos e, sin e]
+        next_turn = self._get_next_turn_signal()  # +1 left / -1 right / 0 straight at next waypoint
 
         obs = np.concatenate([
             joint_pos, joint_vel, head_to_target_xy, orient_z_angle,
-            head_angular_vel, heading_error, np.ravel(self.last_action)
+            head_angular_vel, heading_error, [next_turn], np.ravel(self.last_action)
         ]).astype(np.float32)
 
 
