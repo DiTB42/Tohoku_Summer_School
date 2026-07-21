@@ -95,6 +95,7 @@ class SnakeEnv(gym.Env):
         self.cpg = None  # created in reset(), once model.opt.timestep is known
 
         self.path_waypoints_world = []
+        self._waterfall_joint_states = []
         self.current_waypoint_index = 0
         self.waypoint_threshold = config.reward.waypoint_threshold
 
@@ -164,6 +165,7 @@ class SnakeEnv(gym.Env):
         # The model is rebuilt every reset(), so (re)resolve which qpos/qvel
         # entries belong to the actuated joints.
         self._resolve_actuated_joints()
+        self._resolve_waterfall_joints()
         #self.data.qpos[-12:] = self.init_qpos
         #self.data.qpos[3:7] = np.array([1, 0, 0, 0])
         # Waypoint in world coordinate
@@ -221,6 +223,23 @@ class SnakeEnv(gym.Env):
         self._act_qpos_adr = self.model.jnt_qposadr[ids].copy()
         self._act_dof_adr = self.model.jnt_dofadr[ids].copy()
         self._act_jnt_range = self.model.jnt_range[ids].copy()  # (12, 2), each [-3, 3]
+
+    def _resolve_waterfall_joints(self):
+        """Resolve the slide joints that animate the decorative waterfall strips."""
+        self._waterfall_joint_states = []
+        for joint_index in range(self.model.njnt):
+            joint_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_index)
+            if not joint_name or not joint_name.startswith("waterfall_"):
+                continue
+            if not (joint_name.startswith("waterfall_slide_") or joint_name.startswith("waterfall_band_slide_")):
+                continue
+
+            qpos_adr = self.model.jnt_qposadr[joint_index]
+            is_band = joint_name.startswith("waterfall_band_slide_")
+            speed = 0.36 if is_band else 0.62
+            amplitude = 0.24 if is_band else 0.30
+            phase_offset = joint_index * (0.37 if is_band else 0.21)
+            self._waterfall_joint_states.append((qpos_adr, amplitude, speed, phase_offset))
 
     def _get_heading_error(self, head_to_target_vec):
         """Heading error between the head's forward direction and the direction
@@ -324,6 +343,10 @@ class SnakeEnv(gym.Env):
         act_lo = self._act_jnt_range[:, 0]
         act_hi = self._act_jnt_range[:, 1]
         for _ in range(self.sim_steps_per_rl_step):
+            for qpos_adr, amplitude, speed, phase_offset in self._waterfall_joint_states:
+                phase = (self.current_step * speed + phase_offset) % 1.0
+                self.data.qpos[qpos_adr] = amplitude * (2.0 * phase - 1.0)
+
             target_positions = self.cpg.update()
             clipped_targets = np.clip(target_positions, act_lo, act_hi)
             self.data.ctrl[:] = clipped_targets
