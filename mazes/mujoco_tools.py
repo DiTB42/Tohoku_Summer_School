@@ -6,9 +6,9 @@ import numpy as np
 DEFAULT_FLOOR_RGBA = "0.18 0.48 0.16 0.01"
 DEFAULT_FLOOR_FRICTION = "3 0.005 0.0001"
 ICE_FLOOR_RGBA = "0.72 0.90 1.00 0.34"
-ICE_FLOOR_FRICTION = "0.15 0.00004 0.00001"
+ICE_FLOOR_FRICTION = "0.03 0.000005 0.000001"
 WATERFALL_FLOOR_RGBA = "0.08 0.36 0.78 0.36"
-WATERFALL_FLOOR_FRICTION = "15.0 0.0375 0.0005"
+WATERFALL_FLOOR_FRICTION = "18.0 0.05 0.0007"
 
 
 def _select_waterfall_points(waypoints, start_pos, goal_pos, rng):
@@ -134,15 +134,16 @@ def _select_ice_floor_points(maze, start_pos, goal_pos, rng, blocked_points=None
         return []
 
     candidate_set = set(candidates)
-    center_count = min(max(2, len(candidates) // 16), max(2, len(candidates) // 5))
+    center_count = min(max(3, len(candidates) // 12), max(3, len(candidates) // 4))
     center_indices = rng.choice(len(candidates), size=center_count, replace=False)
 
     ice_points = set()
     neighbor_groups = [
-        ([(-1, 0), (1, 0), (0, -1), (0, 1)], 0.72),
-        ([(-1, -1), (-1, 1), (1, -1), (1, 1)], 0.48),
-        ([(-2, 0), (2, 0), (0, -2), (0, 2)], 0.30),
-        ([(-2, -1), (-2, 1), (2, -1), (2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2)], 0.18),
+        ([(-1, 0), (1, 0), (0, -1), (0, 1)], 0.90),
+        ([(-1, -1), (-1, 1), (1, -1), (1, 1)], 0.78),
+        ([(-2, 0), (2, 0), (0, -2), (0, 2)], 0.62),
+        ([(-2, -1), (-2, 1), (2, -1), (2, 1), (-1, -2), (-1, 2), (1, -2), (1, 2)], 0.48),
+        ([(-2, -2), (-2, 2), (2, -2), (2, 2), (-3, 0), (3, 0), (0, -3), (0, 3)], 0.32),
     ]
     for center_index in np.atleast_1d(center_indices).tolist():
         center = candidates[center_index]
