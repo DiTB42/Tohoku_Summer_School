@@ -36,6 +36,8 @@ uv run python viz_stochastic.py models/checkpoints/sac_snake_1000000_steps.zip -
 uv run python viz_checkpoints.py CKPT1.zip CKPT2.zip CKPT3.zip --seed 1   # one snake per checkpoint
 uv run python viz_checkpoints.py --glob "models/checkpoints/sac_snake_*_steps.zip" --pick 1000,10000,100000,1000000
 #   add --no-render for a headless sanity check; PowerShell line-continuation is ` (backtick), NOT \
+# Record an MP4 instead of the live viewer (offscreen; for slides, no screen-recording needed):
+uv run python viz_stochastic.py CKPT.zip --n 20 --record out.mp4 --video-seconds 20 --video-fps 30 --video-res 1280x720
 ```
 
 There is no test suite, linter, or build step — "testing" means running the CPG sanity check,
@@ -138,6 +140,13 @@ Key gotchas / invariants (mirror or diverge from `SnakeEnv` deliberately):
 - Generated XML (combined scene + intermediate maze) is written to a **scratch dir**, not `scenes/`, so
   it does not pollute git. Camera is a fixed top-down free camera framing the whole maze (not the env's
   per-head tracking). `--no-render` runs headless (no viewer, no real-time sleep) for smoke tests.
+- **MP4 recording (`--record out.mp4`):** renders offscreen via `mujoco.Renderer` (no live viewer),
+  compressing the episode's sim time into `--video-seconds` at `--video-fps` by capturing every Nth
+  substep. Encoded with `imageio[ffmpeg]` (added to `requirements.txt`). `scenes/scene_nosnake.xml` sets
+  `<global offwidth/offheight>` to size the offscreen framebuffer — `--video-res` is clamped to it and
+  rounded to a multiple of 16 for H.264. The goal/label markers are drawn into `renderer.scene`
+  (`_draw_markers(..., append=True)`) rather than the viewer's `user_scn`. `_apply_camera` is shared by
+  the live viewer and the recorder so both frame the maze identically.
 
 ## Key conventions
 

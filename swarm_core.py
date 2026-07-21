@@ -259,6 +259,14 @@ class SnakeState:
         self.jnt_range = model.jnt_range[jids].copy()
         self.ctrl_idx = np.array(aids, dtype=int)   # actuator id == ctrl index
 
+        # DOFs of the head's free joint (6: 3 translation + 3 rotation). Zeroed
+        # once when the snake reaches the goal so its base momentum doesn't carry
+        # it past the goal after freezing.
+        head_bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, self.head_name)
+        free_jid = model.body_jntadr[head_bid]
+        free_dof0 = model.jnt_dofadr[free_jid]
+        self.free_dof_adr = np.arange(free_dof0, free_dof0 + 6)
+
         # CPG (dt = physics timestep, matched as env does).
         self.cpg = PaperCPG(n_joints=self.N_ACT, dt=model.opt.timestep)
         self.cpg.set_hyper_parameters(
@@ -269,6 +277,10 @@ class SnakeState:
         self.last_action = np.zeros(self.act_dim, dtype=np.float32)
         self.waypoint_index = 0
         self.done = False
+        # Joint targets to hold once the snake reaches the goal, so it freezes in
+        # place instead of the CPG continuing to wave its joints (which would
+        # keep it crawling). Captured at the moment `done` flips True.
+        self.frozen_ctrl = None
 
     # --- observation (mirrors env_snake.SnakeEnv._get_obs, 37-D) -----------
     def _heading_error(self, data, head_to_target_vec):
@@ -381,16 +393,26 @@ class SnakeSwarm:
         path = self.maze_info["path_world"]
         goal = self.maze_info["goal_world"]
         for s in self.snakes:
+            if s.done:
+                continue
             head = self.data.body(s.head_name).xpos
             if s.waypoint_index < len(path):
                 if np.linalg.norm(path[s.waypoint_index] - head) < self.waypoint_threshold:
                     s.waypoint_index += 1
             if np.linalg.norm(head - goal) < self.waypoint_threshold:
                 s.done = True
+                # Freeze the servos at the current joint angles so the snake
+                # holds its pose and stops crawling, and kill its base + joint
+                # momentum once so it doesn't coast past the goal.
+                s.frozen_ctrl = self.data.qpos[s.qpos_adr].copy()
+                self.data.qvel[s.free_dof_adr] = 0.0
+                self.data.qvel[s.dof_adr] = 0.0
 
     # --- rendering ----------------------------------------------------------
-    def _setup_camera(self):
-        """Top-down free camera framing the whole maze (not per-head tracking)."""
+    def _apply_camera(self, cam):
+        """Configure a MjvCamera as a top-down free camera framing the whole maze
+        (not the env's per-head tracking). Shared by the live viewer and the
+        offscreen MP4 recorder."""
         maze = np.array(self.maze_info["maze"])
         h, w = maze.shape
         corners = [maze_to_world((0, 0)), maze_to_world((w - 1, h - 1))]
@@ -398,16 +420,20 @@ class SnakeSwarm:
         ys = [c[1] for c in corners]
         cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
         extent = max(max(xs) - min(xs), max(ys) - min(ys))
-        cam = self.viewer.cam
         cam.type = mujoco.mjtCamera.mjCAMERA_FREE
         cam.lookat[:] = [cx, cy, 0.0]
-        cam.distance = extent * 1.15 + 4.0
+        cam.distance = extent * 1.15 + 2.0
         cam.azimuth = 90.0
         cam.elevation = -89.0
 
-    def _draw_overlay(self):
-        scn = self.viewer.user_scn
-        scn.ngeom = 0
+    def _draw_markers(self, scn, append=False):
+        """Add the goal marker + per-snake label tags to a scene.
+
+        append=False (live user_scn, an initially-empty overlay scene): reset
+        ngeom to 0 first. append=True (the offscreen renderer.scene, already
+        populated with the model's geoms): append after the existing geoms."""
+        if not append:
+            scn.ngeom = 0
         maxg = scn.maxgeom
 
         def add(gtype, size, pos, rgba, label=""):
@@ -436,10 +462,13 @@ class SnakeSwarm:
                     [head[0], head[1], head[2] + 0.25],
                     [s.color[0], s.color[1], s.color[2], 1.0], s.label)
 
+    def _draw_overlay(self):
+        self._draw_markers(self.viewer.user_scn, append=False)
+
     def _render(self):
         if self.viewer is None:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-            self._setup_camera()
+            self._apply_camera(self.viewer.cam)
         if self.viewer.is_running():
             self._draw_overlay()
             self.viewer.sync()
@@ -447,30 +476,96 @@ class SnakeSwarm:
             return True
         return False
 
+    # --- offscreen MP4 recording -------------------------------------------
+    def _init_recording(self, video_res, video_fps, video_seconds, max_steps,
+                        capture_every):
+        """Set up an offscreen renderer + camera and work out the substep capture
+        cadence. Returns (renderer, cam, capture_every)."""
+        w, h = video_res
+        # Clamp to the model's offscreen framebuffer (set in scene_nosnake.xml),
+        # and to even/macro-block-friendly sizes for the H.264 encoder.
+        ow = int(self.model.vis.global_.offwidth)
+        oh = int(self.model.vis.global_.offheight)
+        w, h = min(w, ow), min(h, oh)
+        w -= w % 16
+        h -= h % 16
+        if (w, h) != tuple(video_res):
+            print(f"[swarm] video resolution adjusted to {w}x{h} "
+                  f"(offscreen buffer {ow}x{oh}, H.264-friendly).")
+        renderer = mujoco.Renderer(self.model, height=h, width=w)
+        cam = mujoco.MjvCamera()
+        self._apply_camera(cam)
+        if capture_every is None:
+            total_sub = max_steps * self.sim_steps
+            n_target = max(1, int(round(video_fps * video_seconds)))
+            capture_every = max(1, round(total_sub / n_target))
+        return renderer, cam, capture_every
+
+    def _encode(self, path, frames, video_fps):
+        if not frames:
+            print("[swarm] no frames captured; nothing to write.")
+            return
+        try:
+            import imageio.v2 as imageio
+        except ImportError:
+            raise SystemExit(
+                "[swarm] MP4 recording needs imageio + ffmpeg. Install with:\n"
+                "  uv pip install \"imageio[ffmpeg]\"")
+        os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+        imageio.mimwrite(path, frames, fps=video_fps, quality=8)
+        print(f"[swarm] wrote {len(frames)} frames -> {path} "
+              f"(~{len(frames) / video_fps:.1f}s at {video_fps}fps)")
+
     # --- main loop ----------------------------------------------------------
-    def run(self, max_steps=250, render=True):
-        """Drive all snakes. render=False runs headless (no viewer window / no
-        real-time sleep) for smoke tests and batch use."""
+    def run(self, max_steps=250, render=True, record=None, video_fps=30,
+            video_res=(1280, 720), video_seconds=20.0, capture_every=None):
+        """Drive all snakes.
+
+        record=<path>  : render offscreen and write an MP4 (no live viewer). The
+                         episode's sim time is compressed into ~video_seconds.
+        render=True    : live interactive viewer (ignored while recording).
+        render=False   : headless (no window, no MP4) -- for smoke tests.
+        """
+        recording = record is not None
+        renderer = cam = None
+        frames = []
+        if recording:
+            render = False
+            renderer, cam, capture_every = self._init_recording(
+                video_res, video_fps, video_seconds, max_steps, capture_every)
         print(f"[swarm] {len(self.snakes)} snakes | maze "
               f"{self.config.env.maze_height}x{self.config.env.maze_width} | "
               f"goal {self.maze_info['goal_pos']} | "
-              f"nq={self.model.nq} nu={self.model.nu} | render={render}")
+              f"nq={self.model.nq} nu={self.model.nu} | "
+              f"{'recording ' + record if recording else f'render={render}'}")
+        substep = 0
         try:
             for step in range(max_steps):
                 actions = self._predict_all()
                 for s, a in zip(self.snakes, actions):
+                    if s.done:
+                        continue  # goal reached: frozen, CPG no longer driven
                     R, omega, theta, delta = (float(x) for x in np.ravel(a))
                     s.cpg.set_parameters(R=R, omega=omega, theta=theta, delta=delta)
 
-                for sub in range(self.sim_steps):
+                for _ in range(self.sim_steps):
                     for s in self.snakes:
-                        tgt = s.cpg.update()
-                        tgt = np.clip(tgt, s.jnt_range[:, 0], s.jnt_range[:, 1])
-                        self.data.ctrl[s.ctrl_idx] = tgt
+                        if s.done:
+                            # Hold the frozen pose so the snake stops moving.
+                            self.data.ctrl[s.ctrl_idx] = s.frozen_ctrl
+                        else:
+                            tgt = np.clip(s.cpg.update(),
+                                          s.jnt_range[:, 0], s.jnt_range[:, 1])
+                            self.data.ctrl[s.ctrl_idx] = tgt
                     mujoco.mj_step(self.model, self.data)
-                    if render and not self._render():
+                    if recording and substep % capture_every == 0:
+                        renderer.update_scene(self.data, camera=cam)
+                        self._draw_markers(renderer.scene, append=True)
+                        frames.append(renderer.render().copy())
+                    elif render and not self._render():
                         print("[swarm] viewer closed; stopping.")
                         return
+                    substep += 1
 
                 for s, a in zip(self.snakes, actions):
                     s.last_action = np.asarray(a, dtype=np.float32).ravel()
@@ -478,11 +573,14 @@ class SnakeSwarm:
 
                 n_done = sum(s.done for s in self.snakes)
                 print(f"[swarm] step {step + 1}/{max_steps}  reached goal: "
-                      f"{n_done}/{len(self.snakes)}")
+                      f"{n_done}/{len(self.snakes)}"
+                      + (f"  frames: {len(frames)}" if recording else ""))
                 if n_done == len(self.snakes):
                     print("[swarm] all snakes reached the goal.")
                     break
-            if render:
+            if recording:
+                self._encode(record, frames, video_fps)
+            elif render:
                 # Hold the final frame so the viewer stays open for inspection.
                 print("[swarm] done. Close the viewer window to exit.")
                 while self.viewer is not None and self.viewer.is_running():
@@ -490,6 +588,8 @@ class SnakeSwarm:
                     self.viewer.sync()
                     time.sleep(0.05)
         finally:
+            if renderer is not None:
+                renderer.close()
             self.close()
 
     def close(self):
@@ -521,4 +621,33 @@ def add_common_args(parser):
                         help="Run headless (no viewer window, no real-time "
                              "pacing) -- useful for a quick sanity check.")
     parser.set_defaults(render=True)
+    # MP4 recording (offscreen; disables the live viewer while active).
+    parser.add_argument("--record", type=str, default=None, metavar="OUT.mp4",
+                        help="Render offscreen and write an MP4 to this path "
+                             "instead of opening the live viewer.")
+    parser.add_argument("--video-fps", type=int, default=30,
+                        help="MP4 frame rate (default 30).")
+    parser.add_argument("--video-seconds", type=float, default=20.0,
+                        help="Target MP4 duration; the episode's sim time is "
+                             "compressed to roughly this many seconds (default 20).")
+    parser.add_argument("--video-res", type=parse_res, default=(1280, 720),
+                        metavar="WxH",
+                        help="MP4 resolution as WxH (default 1280x720; clamped to "
+                             "the offscreen buffer and rounded for H.264).")
     return parser
+
+
+def parse_res(s):
+    """Parse a 'WxH' string into an (int, int) tuple (for --video-res)."""
+    try:
+        w, h = s.lower().split("x")
+        return int(w), int(h)
+    except Exception:
+        raise argparse.ArgumentTypeError(f"resolution must be WxH, got {s!r}")
+
+
+def run_from_args(swarm, args):
+    """Shared entry: dispatch a SnakeSwarm.run() from parsed common args."""
+    swarm.run(max_steps=args.max_steps, render=args.render,
+              record=args.record, video_fps=args.video_fps,
+              video_res=args.video_res, video_seconds=args.video_seconds)

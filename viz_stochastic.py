@@ -17,7 +17,7 @@ import argparse
 from stable_baselines3 import SAC
 
 from config_utils import load_config
-from swarm_core import SnakeSwarm, add_common_args, distinct_colors
+from swarm_core import SnakeSwarm, add_common_args, distinct_colors, run_from_args
 
 
 def main():
@@ -49,7 +49,7 @@ def main():
         render_slowdown=args.render_slowdown, show_labels=args.labels,
         jitter=args.jitter,
     )
-    swarm.run(max_steps=args.max_steps, render=args.render)
+    run_from_args(swarm, args)
 
 
 if __name__ == "__main__":
