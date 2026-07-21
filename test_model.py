@@ -16,6 +16,12 @@ if __name__ == "__main__":
                              "Default: config/default.yaml")
     parser.add_argument("--episodes", type=int, default=5,
                         help="Number of episodes to run (default: 5)")
+    parser.add_argument("--max-steps", type=int, default=250,
+                        help="Max RL steps per episode before truncation "
+                             "(default: 250). Overrides the config's "
+                             "env.max_episode_steps, which is tuned for "
+                             "training and can cut episodes short on larger "
+                             "test maps.")
     parser.add_argument("--render-slowdown", type=float, default=None,
                         help="Playback speed for the viewer. 1.0 = real "
                              "physics time; larger = slower (e.g. 4.0 = 4x "
@@ -31,6 +37,10 @@ if __name__ == "__main__":
     config = load_config(args.config)
     env = SnakeEnv(render_mode="human", config=config,
                    render_slowdown=args.render_slowdown)
+    # Test maps can be larger than the training maps, so the training-tuned
+    # env.max_episode_steps may truncate an episode before the snake reaches
+    # the goal. Give rollouts more room to finish.
+    env.max_episode_steps = args.max_steps
     n_episodes = args.episodes
 
     # Collect every observation seen across all episodes so we can report the
