@@ -19,8 +19,7 @@ dist/
 *.mp4
 
 # Trained models / checkpoints
-models/
-*.zip
+models/checkpoints/
 *.pt
 *.pth
 
