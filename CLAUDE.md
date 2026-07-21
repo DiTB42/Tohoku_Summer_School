@@ -152,6 +152,14 @@ Key gotchas / invariants (mirror or diverge from `SnakeEnv` deliberately):
 
 - Maze→world coordinates: `x = (col − start_col)`, `y = −(row − start_row)`, `z = 0.15`
   (cell size 0.5, so a step of one cell = 1.0 world units). Note the **y-axis is flipped**.
+- **Fixed goal distance:** every `SnakeEnv.reset()` produces a goal that is *exactly*
+  `GOAL_PATH_LENGTH` (=30, hardcoded in `env_snake.py`) A* moves from the fixed start
+  `(1,1)`, so episode difficulty is constant. `reset()` regenerates the maze (up to
+  `MAX_MAZE_ATTEMPTS`=1000) until a cell at that exact BFS distance exists (~99% of 10x10
+  mazes qualify on the first try). Candidate distances come from `cell_distances()`
+  (single BFS) in `mazes/make_maze.py`. The old `min_goal_distance` config key is now
+  **unused** (superseded). `swarm_core.py` (viz tool) still uses the old random goal and
+  was intentionally left unchanged.
 - Config/reward tuning is the primary knob for behavior — prefer editing `config/*.yaml` over
   hardcoding. Create a new YAML and pass `--config` rather than mutating `default.yaml` for experiments.
 - Known limitation: complex full mazes produce NaN errors; the config is tuned for corridor-like layouts.

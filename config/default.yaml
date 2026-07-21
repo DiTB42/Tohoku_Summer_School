@@ -47,7 +47,7 @@ training:
 env:
   cpg_frequency: 50
   rl_frequency: 0.2
-  max_episode_steps: 90
+  max_episode_steps: 250    # goal is now a fixed ~30-cell A* path; needs time to traverse
   maze_height: 10           # KEEP: corridor-only, see README Limitations
   maze_width: 10
   # 学生課題1 (行動空間 R⁴ 化, docs/STUDENT_TASKS_JP.md): 行動空間は
@@ -58,6 +58,7 @@ env:
   #   delta : joint offset (0 = straight, nonzero = turn)
   action_low:  [0.1, 1.7, 0.4, -0.1]
   action_high: [0.7, 2.3, 1,  0.1]
-  # Goal must be at least this many maze cells (Manhattan) from the start,
-  # so it never spawns right next to the snake.
+  # UNUSED: superseded by the fixed GOAL_PATH_LENGTH (=30 A* moves) in env_snake.py.
+  # Kept only so existing configs don't break; the goal is now always exactly 30 A*
+  # moves from the start (reset() regenerates the maze until such a cell exists).
   min_goal_distance: 2

@@ -5,10 +5,17 @@ import mujoco
 import mujoco.viewer
 import os
 import time
-from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar
+from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar, cell_distances
 from mazes.mujoco_tools import make_maze_on_mujoco
 from cpg.snake_cpg import PaperCPG
 from config_utils import load_config
+
+# Every episode's goal is exactly this many A* moves (edges) from the start, so
+# episode difficulty (path length) is constant and training is predictable. If a
+# freshly generated maze has no cell at this exact distance, reset() regenerates the
+# maze (up to MAX_MAZE_ATTEMPTS times); ~99% of 10x10 mazes qualify on the first try.
+GOAL_PATH_LENGTH = 30
+MAX_MAZE_ATTEMPTS = 1000
 
 class SnakeEnv(gym.Env):
     metadata = {'render_modes': ['human'], 'render_fps': 50}
@@ -117,26 +124,29 @@ class SnakeEnv(gym.Env):
         super().reset(seed=seed)
         if self.viewer is not None:
             self.close()
-        self.maze_layout = create_maze_layout(self.config.env.maze_height, self.config.env.maze_width)
+        # Regenerate the maze until it contains a goal that is EXACTLY
+        # GOAL_PATH_LENGTH A* moves (edges) from the start, so every episode has the
+        # same path length and difficulty. cell_distances() is a single BFS from the
+        # start (the maze is a perfect maze / tree, so BFS distance == A* path length).
+        # (Supersedes the old min_goal_distance Manhattan filter, which is now unused.)
+        self.maze_layout = None
+        goal_candidates = []
+        for _ in range(MAX_MAZE_ATTEMPTS):
+            self.maze_layout = create_maze_layout(self.config.env.maze_height, self.config.env.maze_width)
+            dist = cell_distances(self.maze_layout, self.start_pos_maze)
+            goal_candidates = [p for p, d in dist.items() if d == GOAL_PATH_LENGTH]
+            if goal_candidates:
+                break
+        else:
+            raise RuntimeError(
+                f"No cell exactly {GOAL_PATH_LENGTH} A* moves from start after "
+                f"{MAX_MAZE_ATTEMPTS} maze regenerations."
+            )
         self.valid_spawn_points_maze = get_valid_spawn_points(self.maze_layout)
-        # Random Goal. Require the goal to be at least min_goal_distance maze
-        # cells (Manhattan) away from the start, so it never coincides with or
-        # sits right next to the snake's spawn (which would end the episode in
-        # ~1 step via the goal-reached check in step()).
-        sx, sy = self.start_pos_maze
-        min_dist = self.config.env.min_goal_distance
-        goal_candidates = [p for p in self.valid_spawn_points_maze
-                           if abs(p[0] - sx) + abs(p[1] - sy) >= min_dist]
-        if not goal_candidates:
-            # Fall back to anything that isn't the start cell itself.
-            goal_candidates = [p for p in self.valid_spawn_points_maze
-                               if tuple(p) != self.start_pos_maze]
-        if not goal_candidates:
-            goal_candidates = self.valid_spawn_points_maze
         goal_idx = self.np_random.integers(0, len(goal_candidates))
         goal_pos_maze = goal_candidates[goal_idx]
-        
-        # A* path towards new goal
+
+        # A* path towards new goal (len(path_maze) - 1 == GOAL_PATH_LENGTH by construction)
         path_maze = astar(self.maze_layout, self.start_pos_maze, goal_pos_maze)
         
         # New xml with new goal and waypoints  

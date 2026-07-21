@@ -1,6 +1,7 @@
 import random
 import numpy as np
 import heapq
+from collections import deque
 
 # --- FUNZIONI DI UTILITÀ PER LA GENERAZIONE DEL LABIRINTO ---
 
@@ -37,6 +38,25 @@ def get_valid_spawn_points(maze):
             if maze[y][x] == 0:
                 valid_points.append((x, y))
     return valid_points
+
+def cell_distances(maze, start):
+    """BFS shortest-path distance (in moves) from `start` to every reachable corridor cell.
+
+    Restituisce {(x, y): dist}. Le coordinate sono (x, y) == (col, row), come per
+    astar / get_valid_spawn_points. Poiché il labirinto è "perfetto" (un albero), la
+    distanza BFS coincide con la lunghezza del percorso A* fino a quella cella.
+    """
+    dist = {start: 0}
+    q = deque([start])
+    height, width = len(maze), len(maze[0])
+    while q:
+        x, y = q.popleft()
+        for dx, dy in DIRECTIONS:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and maze[ny][nx] == 0 and (nx, ny) not in dist:
+                dist[(nx, ny)] = dist[(x, y)] + 1
+                q.append((nx, ny))
+    return dist
 
 def astar(maze, start, goal):
     """Algoritmo A* per trovare il percorso più breve."""
