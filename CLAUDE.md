@@ -101,6 +101,24 @@ The maze XML is **generated at runtime, not authored by hand**:
   **`scenes/scene_maze_trial.xml`** — then loads *that* file. So `scene_maze_trial.xml` is a
   regenerated artifact (it shows as modified in git after any run); don't hand-edit it expecting the
   change to survive. Edit `scene.xml` / `snake.xml` or the generator instead.
+- The generator no longer adds per-cell overlay floor geoms (`corridor_floor_*`, `ice_floor_*`,
+  `waterfall_floor_*`). The only ground surface should come from the base scene's `floor` plane;
+  stale generated XMLs keep old overlay geoms until the next regeneration. Exception: waterfall
+  patches now add a localized rough `waterfall_floor_*` contact layer again, with elevated friction,
+  so traversing the waterfall square can slow the snake without making the decorative white/blue
+  moving strips collidable. Random `ice_floor_*` patches can also be generated on open maze cells
+  with very low friction to create slippery regions, and they are explicitly excluded from waterfall
+  cells.
+- Maze walls are still blocked by one base colliding box per wall cell. Decorative `mountain_*`
+  box geoms are only added on a subset of exposed wall faces, anchored from the wall edges so some
+  walls stay plain while others get rocky outcrops; the selected mountain walls now use randomized
+  profiles so some are a single broad block while others stack 2-5 non-colliding tiers with varied
+  width, height, and spacing. The current profile tuning biases wider bases and gentler tapering,
+  closer to the earlier chunkier mountain look. All wall bodies also get a few small non-colliding
+  grey `stone_*` cap geoms on top so even plain brown walls are less flat; those stone caps now
+  stay as angular `box` geoms but randomize square-vs-rectangular footprint and size. Narrow-path
+  edge extensions still come from the base colliding wall box. If the wall look changes again,
+  update `mazes/mujoco_tools.py` rather than any generated `scene_maze_*.xml`.
 - The snake **head body is named `frame_0-1`** — used throughout `env_snake.py` for head position,
   orientation, angular velocity, and the tracking camera.
 
