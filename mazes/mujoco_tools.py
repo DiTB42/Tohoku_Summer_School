@@ -42,6 +42,11 @@ _NOCOLLIDE = {"contype": "0", "conaffinity": "0"}
 # reads as a marker, not a temple.
 DECOR_BEACON_RGBA = "0.55 0.85 1.0 0.30"  # translucent glow pillar
 DECOR_ORB_RGBA = "0.80 0.95 1.0 0.75"     # floating orb on top
+DECOR_TRUNK_RGBA = "0.39 0.25 0.13 1"
+DECOR_BLOSSOM_RGBA = "0.98 0.74 0.86 0.95"
+DECOR_PETAL_RGBA = "0.98 0.66 0.84 0.90"
+DECOR_WATERFALL_RGBA = "0.35 0.62 0.90 0.45"
+DECOR_WATERFALL_FOAM_RGBA = "0.95 0.97 1.0 0.85"
 
 def _decor_salt(maze):
     """Deterministic 32-bit salt from the maze layout (position-weighted fold
@@ -108,10 +113,12 @@ def _base_stones_for_cell(row, col, salt, bx, by, bh):
     return stones
 
 def _add_base_stones(body, row, col, salt, bx, by, bh):
-    for k, (sx, sy, sz, px, py, pz, rgba) in enumerate(_base_stones_for_cell(row, col, salt, bx, by, bh)):
+    stones = _base_stones_for_cell(row, col, salt, bx, by, bh)
+    for k, (sx, sy, sz, px, py, pz, rgba) in enumerate(stones):
         ET.SubElement(body, "geom", dict(_NOCOLLIDE,
             name=f"stone_{row}_{col}_{k}", type="box",
             size=f"{sx} {sy} {sz}", pos=f"{px} {py} {pz}", rgba=rgba))
+    return len(stones)
 
 def _mountain_layers_for_cell(maze, row, col, salt, bx, by, bh):
     """kb mountain profile: 1-5 tiers that grow out of an exposed wall face and
@@ -189,10 +196,178 @@ def _mountain_layers_for_cell(maze, row, col, salt, bx, by, bh):
     return layers
 
 def _add_mountain_wall_layers(body, maze, row, col, salt, bx, by, bh):
-    for k, (sx, sy, sz, px, py, pz, rgba) in enumerate(_mountain_layers_for_cell(maze, row, col, salt, bx, by, bh)):
+    layers = _mountain_layers_for_cell(maze, row, col, salt, bx, by, bh)
+    for k, (sx, sy, sz, px, py, pz, rgba) in enumerate(layers):
         ET.SubElement(body, "geom", dict(_NOCOLLIDE,
             name=f"mountain_{row}_{col}_{k}", type="box",
             size=f"{sx} {sy} {sz}", pos=f"{px} {py} {pz}", rgba=rgba))
+    if not layers:
+        return 0, None
+    peak = max(layers, key=lambda g: g[5] + g[2])
+    peak_local = (peak[3], peak[4], peak[5] + peak[2])
+    return len(layers), peak_local
+
+def _add_cherry_blossom_tree(body, maze, row, col, salt, bx, by, bh):
+    """Add a stylized cherry tree on a decorated wall cell.
+
+    Tree structure:
+      * brown trunk (cylinder)
+      * pink canopy (spheres) mounted on a hinge joint named cherry_sway_*
+      * tiny petals on slide joints named cherry_petal_drop_* (animated in code)
+
+    All geoms are non-colliding and purely cosmetic.
+    """
+    seed = (((row + 1) * 12379 + (col + 1) * 28411) ^ (salt * 3 + 17)) & 0xFFFFFFFF
+    faces = _exposed_wall_faces(maze, row, col)
+    if not faces:
+        return False
+    # Higher coverage than before, but still not every decorated wall.
+    if (seed % 5) == 0:
+        return False
+
+    rng = np.random.default_rng(seed)
+    fx, fy = faces[seed % len(faces)]
+    tx, ty = -fy, fx
+
+    def _add_one_tree(tree_idx, force_overhang=False):
+        height_mode = tree_idx % 3
+        if height_mode == 0:
+            trunk_h = bh * (1.25 + 0.35 * rng.random())   # short
+        elif height_mode == 1:
+            trunk_h = bh * (1.85 + 0.45 * rng.random())   # medium
+        else:
+            trunk_h = bh * (2.45 + 0.60 * rng.random())   # tall
+
+        narrow = ((seed + tree_idx) % 2) == 0
+        if narrow:
+            canopy_x = bx * (0.24 + 0.10 * rng.random())
+            canopy_y = by * (0.32 + 0.14 * rng.random())
+        else:
+            canopy_x = bx * (0.36 + 0.22 * rng.random())
+            canopy_y = by * (0.42 + 0.26 * rng.random())
+        canopy_z = bh * (0.34 + 0.20 * rng.random())
+
+        if force_overhang:
+            face_push = 0.62 + 0.22 * rng.random()
+        else:
+            face_push = 0.36 + 0.24 * rng.random()
+        base_x = fx * bx * face_push + tx * (rng.random() - 0.5) * bx * 0.45
+        base_y = fy * by * face_push + ty * (rng.random() - 0.5) * by * 0.45
+        trunk_r = min(bx, by) * (0.07 + 0.03 * rng.random())
+
+        tag = f"{row}_{col}_{tree_idx}"
+        tree = ET.SubElement(body, "body", {
+            "name": f"cherry_{tag}",
+            "pos": f"{base_x} {base_y} {bh + 0.003}",
+        })
+        ET.SubElement(tree, "geom", dict(_NOCOLLIDE,
+            name=f"cherry_trunk_{tag}", type="cylinder",
+            size=f"{trunk_r} {trunk_h * 0.5}", pos=f"0 0 {trunk_h * 0.5}",
+            rgba=DECOR_TRUNK_RGBA))
+
+        canopy = ET.SubElement(tree, "body", {
+            "name": f"cherry_canopy_{tag}",
+            "pos": f"0 0 {trunk_h}",
+        })
+        ET.SubElement(canopy, "joint", {
+            "name": f"cherry_sway_{tag}",
+            "type": "hinge",
+            "axis": "0 1 0",
+            "range": "-0.45 0.45",
+            "damping": "0.02",
+        })
+        # Dense clustered small rectangular leaves for textured canopy.
+        n_leaf_blocks = 24 if not narrow else 18
+        for b in range(n_leaf_blocks):
+            u = rng.normal(0.0, 0.42)
+            v = rng.normal(0.0, 0.40)
+            w = rng.normal(0.35, 0.30)
+            lx = np.clip(u, -1.1, 1.1) * canopy_x
+            ly = np.clip(v, -1.1, 1.1) * canopy_y
+            lz = max(-0.35, min(1.35, w)) * canopy_z
+            sx = canopy_x * (0.12 + 0.10 * rng.random())
+            sy = canopy_y * (0.12 + 0.10 * rng.random())
+            sz = canopy_z * (0.16 + 0.12 * rng.random())
+            ET.SubElement(canopy, "geom", dict(_NOCOLLIDE,
+                name=f"cherry_blossom_{tag}_{b}", type="box",
+                size=f"{sx} {sy} {sz}", pos=f"{lx} {ly} {lz}", rgba=DECOR_BLOSSOM_RGBA))
+
+        petal_count = 10 if force_overhang else 7
+        for k in range(petal_count):
+            px = fx * canopy_x * (0.35 + 0.95 * rng.random()) + tx * (rng.random() - 0.5) * canopy_x * 1.6
+            py = fy * canopy_y * (0.35 + 0.95 * rng.random()) + ty * (rng.random() - 0.5) * canopy_y * 1.6
+            pz = canopy_z * (0.30 + 1.05 * rng.random())
+            drop_span = 1.40 + 1.30 * rng.random() if force_overhang else 1.00 + 0.90 * rng.random()
+            petal = ET.SubElement(tree, "body", {
+                "name": f"cherry_petal_{tag}_{k}",
+                "pos": f"{px} {py} {trunk_h + pz}",
+            })
+            ET.SubElement(petal, "joint", {
+                "name": f"cherry_petal_drop_{tag}_{k}",
+                "type": "slide",
+                "axis": "0 0 -1",
+                "range": f"0 {drop_span}",
+                "damping": "0",
+            })
+            ET.SubElement(petal, "geom", dict(_NOCOLLIDE,
+                name=f"cherry_petal_geom_{tag}_{k}",
+                type="box", size="0.008 0.004 0.006", rgba=DECOR_PETAL_RGBA))
+
+    # Mix single trees and clusters for variation.
+    cluster_mode = seed % 10
+    if cluster_mode <= 4:
+        n_trees = 1
+    elif cluster_mode <= 7:
+        n_trees = 2
+    else:
+        n_trees = 3
+    for idx in range(n_trees):
+        _add_one_tree(idx, force_overhang=(idx == n_trees - 1 and n_trees >= 2 and (seed % 2 == 1)))
+    return True
+
+def _add_waterfall_from_peak(worldbody, peak_xyz, salt):
+    """Add a decorative VERTICAL waterfall from mountain peak to floor.
+
+    Starts exactly at the detected mountain peak (same x/y/z) and falls straight
+    down in world -z to the route/floor height.
+    """
+    px, py, pz = peak_xyz
+    floor_z = 0.10
+    length = float(max(0.5, pz - floor_z))
+    axis = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+
+    wf = ET.SubElement(worldbody, "body", {
+        "name": "waterfall_main",
+        "pos": f"{px} {py} {pz}",
+    })
+
+    n_segments = max(6, int(length / 0.16))
+    for s in range(n_segments):
+        t = (s + 0.5) / n_segments
+        pos = axis * (t * length)
+        ET.SubElement(wf, "geom", dict(_NOCOLLIDE,
+            name=f"waterfall_blue_{s}", type="box",
+            size="0.070 0.026 0.080",
+            pos=f"{pos[0]} {pos[1]} {pos[2]}", rgba=DECOR_WATERFALL_RGBA))
+
+    rng = np.random.default_rng((salt * 7 + 19) & 0xFFFFFFFF)
+    for k in range(14):
+        dx = (rng.random() - 0.5) * 0.12
+        dy = (rng.random() - 0.5) * 0.06
+        strip = ET.SubElement(wf, "body", {
+            "name": f"waterfall_flow_body_{k}",
+            "pos": f"{dx} {dy} 0.0",
+        })
+        ET.SubElement(strip, "joint", {
+            "name": f"waterfall_flow_{k}",
+            "type": "slide",
+            "axis": "0 0 -1",
+            "range": f"0 {length}",
+            "damping": "0",
+        })
+        ET.SubElement(strip, "geom", dict(_NOCOLLIDE,
+            name=f"waterfall_white_{k}", type="box",
+            size="0.010 0.006 0.050", rgba=DECOR_WATERFALL_FOAM_RGBA))
 
 def _add_goal_beacon(worldbody, gx, gy):
     """A small translucent glowing pillar + floating orb over the goal, so it
@@ -256,99 +431,111 @@ def _cave_recessions(maze, widths, start_pos, box_size):
   return recess
 
 def make_maze_on_mujoco(load_file_path, maze, start_pos, goal_pos, waypoints=None, box_size=[0.5, 0.5, 0.15], maze_rgba="0.5 0.5 0.5 1", goal_rgba="0.6 0.9 0.6 0.5", waypoint_rgba="1 1 0 0.5", terrain=None, widths=None, decorations=False, save_file_path=None):
-  tree = ET.parse(load_file_path)
-  root = tree.getroot()
-  worldbody = root.find("./worldbody")
+    tree = ET.parse(load_file_path)
+    root = tree.getroot()
+    worldbody = root.find("./worldbody")
 
-  # Rimuovi i vecchi elementi del labirinto per rigenerarlo. 'beacon' is the
-  # decorative goal-beacon body; wall-attached decorations (mountain_/stone_)
-  # ride on the box_* bodies removed here, so they need no separate handling.
-  for body in worldbody.findall("body"):
-      name = body.get('name')
-      if name and ('box_' in name or 'goal' in name or name.startswith('beacon')):
-          worldbody.remove(body)
-  for geom in list(worldbody.findall("geom")):
-      geom_name = geom.get('name') or ""
-      if 'waypoint_' in geom_name or geom_name.startswith('terrain_'):
-          worldbody.remove(geom)
+    # Rimuovi i vecchi elementi del labirinto per rigenerarlo. 'beacon' is the
+    # decorative goal-beacon body; wall-attached decorations (mountain_/stone_)
+    # ride on the box_* bodies removed here, so they need no separate handling.
+    for body in worldbody.findall("body"):
+        name = body.get('name')
+        if name and ('box_' in name or 'goal' in name or name.startswith('beacon')):
+            worldbody.remove(body)
+    for geom in list(worldbody.findall("geom")):
+        geom_name = geom.get('name') or ""
+        if 'waypoint_' in geom_name or geom_name.startswith('terrain_'):
+            worldbody.remove(geom)
 
-  # Cosmetic dressing only (see the decoration helpers above): recolor the
-  # scene now, and precompute a layout-derived salt for the per-cell props.
-  if decorations:
-      _recolor_scene(root)
-  decor_salt = _decor_salt(maze) if decorations else 0
+    # Cosmetic dressing only (see the decoration helpers above): recolor the
+    # scene now, and precompute a layout-derived salt for the per-cell props.
+    if decorations:
+        _recolor_scene(root)
+    decor_salt = _decor_salt(maze) if decorations else 0
 
-  # Terrain tiles: one thin box per non-grass open cell, sitting 0.2 mm proud
-  # of the floor plane so contacts land on the tile instead of the plane.
-  # priority="1" is REQUIRED: snake geoms inherit mu=3 from snake.xml's global
-  # default and equal-priority contacts take the elementwise max, so without
-  # it ice (mu=1) would resolve to max(1, 3) = 3 and do nothing. With priority
-  # 1 the tile's friction wins outright (for both ice and dirt).
-  if terrain:
-      for (col, row), terrain_type in terrain.items():
-          tile = TERRAIN_TILES[terrain_type]
-          pos_x = 2 * box_size[0] * (col - start_pos[0])
-          pos_y = -2 * box_size[1] * (row - start_pos[1])
-          # Tiles stay full-cell: in a cave the flank walls grow inward and simply
-          # sit on top of the tile edges, so the snake only ever contacts the tile
-          # in the (narrowed) central passage. No tile resize needed.
-          ET.SubElement(worldbody, "geom", {
-              "name": f"terrain_{terrain_type}_{row}_{col}",
-              "type": "box",
-              "size": f"{box_size[0]} {box_size[1]} 0.004",
-              "pos": f"{pos_x} {pos_y} -0.0038",
-              "rgba": tile["rgba"],
-              "friction": tile["friction"],
-              "priority": "1",
-          })
+    # Terrain tiles: one thin box per non-grass open cell, sitting 0.2 mm proud
+    # of the floor plane so contacts land on the tile instead of the plane.
+    # priority="1" is REQUIRED: snake geoms inherit mu=3 from snake.xml's global
+    # default and equal-priority contacts take the elementwise max, so without
+    # it ice (mu=1) would resolve to max(1, 3) = 3 and do nothing. With priority
+    # 1 the tile's friction wins outright (for both ice and dirt).
+    if terrain:
+        for (col, row), terrain_type in terrain.items():
+            tile = TERRAIN_TILES[terrain_type]
+            pos_x = 2 * box_size[0] * (col - start_pos[0])
+            pos_y = -2 * box_size[1] * (row - start_pos[1])
+            # Tiles stay full-cell: in a cave the flank walls grow inward and simply
+            # sit on top of the tile edges, so the snake only ever contacts the tile
+            # in the (narrowed) central passage. No tile resize needed.
+            ET.SubElement(worldbody, "geom", {
+                "name": f"terrain_{terrain_type}_{row}_{col}",
+                "type": "box",
+                "size": f"{box_size[0]} {box_size[1]} 0.004",
+                "pos": f"{pos_x} {pos_y} -0.0038",
+                "rgba": tile["rgba"],
+                "friction": tile["friction"],
+                "priority": "1",
+            })
 
-  # Precompute per-wall face offsets that pinch the caves narrower (empty if no widths).
-  recess = _cave_recessions(maze, widths, start_pos, box_size) if widths else {}
+    # Precompute per-wall face offsets that pinch the caves narrower (empty if no widths).
+    recess = _cave_recessions(maze, widths, start_pos, box_size) if widths else {}
+    tallest_peak = None
 
-  # Crea i muri del labirinto
-  for i in range(maze.shape[0]):
-    for j in range(maze.shape[1]):
-      if maze[i][j] == 1:
-        pos_x = 2 * box_size[0] * (j - start_pos[0])
-        pos_y = -2 * box_size[1] * (i - start_pos[1])
-        # Default full-cell world bounds; grow inner faces into adjacent caves.
-        x0, x1 = pos_x - box_size[0], pos_x + box_size[0]
-        y0, y1 = pos_y - box_size[1], pos_y + box_size[1]
-        r = recess.get((i, j))
-        if r:
-          x0 += r["x0"]; x1 += r["x1"]; y0 += r["y0"]; y1 += r["y1"]
-        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-        sx, sy = (x1 - x0) / 2.0, (y1 - y0) / 2.0
-        body = ET.SubElement(worldbody, "body", {"name": f"box_{i}_{j}", "pos": f"{cx} {cy} {box_size[2]}"})
-        ET.SubElement(body, "geom", {"name": f"geom_{i}_{j}", "type": "box", "size": f"{sx} {sy} {box_size[2]}", "rgba": maze_rgba})
-        # Cosmetic rocky dressing (non-colliding, kb-style): grey stone caps on
-        # ~half the walls; asymmetric mountain stacks growing out of exposed
-        # faces on a subset of walls.
-        if decorations:
-          _add_base_stones(body, i, j, decor_salt, sx, sy, box_size[2])
-          _add_mountain_wall_layers(body, maze, i, j, decor_salt, sx, sy, box_size[2])
+    # Crea i muri del labirinto
+    for i in range(maze.shape[0]):
+        for j in range(maze.shape[1]):
+            if maze[i][j] == 1:
+                pos_x = 2 * box_size[0] * (j - start_pos[0])
+                pos_y = -2 * box_size[1] * (i - start_pos[1])
+                # Default full-cell world bounds; grow inner faces into adjacent caves.
+                x0, x1 = pos_x - box_size[0], pos_x + box_size[0]
+                y0, y1 = pos_y - box_size[1], pos_y + box_size[1]
+                r = recess.get((i, j))
+                if r:
+                    x0 += r["x0"]
+                    x1 += r["x1"]
+                    y0 += r["y0"]
+                    y1 += r["y1"]
+                cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+                sx, sy = (x1 - x0) / 2.0, (y1 - y0) / 2.0
+                body = ET.SubElement(worldbody, "body", {"name": f"box_{i}_{j}", "pos": f"{cx} {cy} {box_size[2]}"})
+                ET.SubElement(body, "geom", {"name": f"geom_{i}_{j}", "type": "box", "size": f"{sx} {sy} {box_size[2]}", "rgba": maze_rgba})
+                # Cosmetic rocky dressing (non-colliding): stones/mountains + blossoms.
+                if decorations:
+                    n_stones = _add_base_stones(body, i, j, decor_salt, sx, sy, box_size[2])
+                    n_mountains, peak_local = _add_mountain_wall_layers(body, maze, i, j, decor_salt, sx, sy, box_size[2])
+                    if peak_local is not None:
+                        peak_world = (cx + peak_local[0], cy + peak_local[1], box_size[2] + peak_local[2])
+                        if tallest_peak is None or peak_world[2] > tallest_peak[2]:
+                            tallest_peak = peak_world
+                    if n_stones > 0 or n_mountains > 0:
+                        _add_cherry_blossom_tree(body, maze, i, j, decor_salt, sx, sy, box_size[2])
 
-  # Aggiungi i waypoint come sfere visive
-  if waypoints:
-      for idx, point in enumerate(waypoints):
-          if list(point) == start_pos or list(point) == goal_pos:
-              continue
-          pos_x = 2 * box_size[0] * (point[0] - start_pos[0])
-          pos_y = -2 * box_size[1] * (point[1] - start_pos[1])
-          ET.SubElement(worldbody, "geom", {"name": f"waypoint_{idx}", "type": "sphere", "size": "0.1", "pos": f"{pos_x} {pos_y} 0.1", "rgba": waypoint_rgba, "contype": "0", "conaffinity": "0"})
+    # Decorative waterfall from tallest mountain peak straight down to floor.
+    if decorations and tallest_peak is not None and waypoints:
+        _add_waterfall_from_peak(worldbody, tallest_peak, decor_salt)
 
-  # Crea il goal
-  pos_x = 2 * box_size[0] * (goal_pos[0] - start_pos[0])
-  pos_y = -2 * box_size[1] * (goal_pos[1] - start_pos[1])
-  body = ET.SubElement(worldbody, "body", {"name": "goal", "pos": f"{pos_x} {pos_y} {box_size[2]}"})
-  ET.SubElement(body, "geom", {"name": "goal_geom", "type": "box", "size": f"{box_size[0]} {box_size[1]} {box_size[2]}", "contype": "0", "conaffinity": "0", "rgba": goal_rgba})
+    # Aggiungi i waypoint come sfere visive
+    if waypoints:
+        for idx, point in enumerate(waypoints):
+            if list(point) == start_pos or list(point) == goal_pos:
+                continue
+            pos_x = 2 * box_size[0] * (point[0] - start_pos[0])
+            pos_y = -2 * box_size[1] * (point[1] - start_pos[1])
+            ET.SubElement(worldbody, "geom", {"name": f"waypoint_{idx}", "type": "sphere", "size": "0.1", "pos": f"{pos_x} {pos_y} 0.1", "rgba": waypoint_rgba, "contype": "0", "conaffinity": "0"})
 
-  # Glowing beacon over the goal so it stands out from the top-down swarm camera.
-  if decorations:
-      _add_goal_beacon(worldbody, pos_x, pos_y)
+    # Crea il goal
+    pos_x = 2 * box_size[0] * (goal_pos[0] - start_pos[0])
+    pos_y = -2 * box_size[1] * (goal_pos[1] - start_pos[1])
+    body = ET.SubElement(worldbody, "body", {"name": "goal", "pos": f"{pos_x} {pos_y} {box_size[2]}"})
+    ET.SubElement(body, "geom", {"name": "goal_geom", "type": "box", "size": f"{box_size[0]} {box_size[1]} {box_size[2]}", "contype": "0", "conaffinity": "0", "rgba": goal_rgba})
 
-  if save_file_path:
-    tree.write(save_file_path, encoding="utf-8", xml_declaration=True)
+    # Glowing beacon over the goal so it stands out from the top-down swarm camera.
+    if decorations:
+        _add_goal_beacon(worldbody, pos_x, pos_y)
+
+    if save_file_path:
+        tree.write(save_file_path, encoding="utf-8", xml_declaration=True)
 
 def update_maze(load_file_path, start_pos, goal_pos, waypoints=None, box_size=[0.5, 0.5, 0.15], goal_rgba="0.6 0.9 0.6 0.5", waypoint_rgba="1 1 0 0.5", save_file_path=None):
     tree = ET.parse(load_file_path)

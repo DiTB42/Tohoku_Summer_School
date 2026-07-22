@@ -127,6 +127,19 @@ class SnakeEnv(gym.Env):
         # Current CPG parameters, shown as a text overlay in the viewer.
         self._display_params = {"R": self.R, "omega": self.omega,
                                 "theta": 0.0, "delta": self.delta}
+        # Optional decorative animation channels (cherry blossom sway/petals).
+        self._decor_sway_qpos_adr = np.array([], dtype=int)
+        self._decor_sway_amp = np.array([], dtype=np.float64)
+        self._decor_sway_freq = np.array([], dtype=np.float64)
+        self._decor_sway_phase = np.array([], dtype=np.float64)
+        self._decor_petal_qpos_adr = np.array([], dtype=int)
+        self._decor_petal_span = np.array([], dtype=np.float64)
+        self._decor_petal_speed = np.array([], dtype=np.float64)
+        self._decor_petal_phase = np.array([], dtype=np.float64)
+        self._decor_waterfall_qpos_adr = np.array([], dtype=int)
+        self._decor_waterfall_span = np.array([], dtype=np.float64)
+        self._decor_waterfall_speed = np.array([], dtype=np.float64)
+        self._decor_waterfall_phase = np.array([], dtype=np.float64)
 
     def _maze_to_world(self, maze_pos):
         """ maze coordinates in mujoco coordinates"""
@@ -241,6 +254,7 @@ class SnakeEnv(gym.Env):
         # The model is rebuilt every reset(), so (re)resolve which qpos/qvel
         # entries belong to the actuated joints.
         self._resolve_actuated_joints()
+        self._resolve_decorative_joints()
         #self.data.qpos[-12:] = self.init_qpos
         #self.data.qpos[3:7] = np.array([1, 0, 0, 0])
         # Waypoint in world coordinate
@@ -298,6 +312,67 @@ class SnakeEnv(gym.Env):
         self._act_qpos_adr = self.model.jnt_qposadr[ids].copy()
         self._act_dof_adr = self.model.jnt_dofadr[ids].copy()
         self._act_jnt_range = self.model.jnt_range[ids].copy()  # (12, 2), each [-3, 3]
+
+    def _resolve_decorative_joints(self):
+        """Cache optional cherry-blossom joints for runtime visual animation."""
+        sway_qpos_adr, sway_amp, sway_freq, sway_phase = [], [], [], []
+        petal_qpos_adr, petal_span, petal_speed, petal_phase = [], [], [], []
+        water_qpos_adr, water_span, water_speed, water_phase = [], [], [], []
+
+        for j in range(self.model.njnt):
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, j) or ""
+            if name.startswith("cherry_sway_"):
+                code = sum(ord(c) for c in name)
+                sway_qpos_adr.append(int(self.model.jnt_qposadr[j]))
+                sway_amp.append(0.10 + 0.10 * ((code % 17) / 16.0))
+                sway_freq.append(1.2 + 0.8 * (((code // 17) % 13) / 12.0))
+                sway_phase.append((code % 37) * 0.17)
+            elif name.startswith("cherry_petal_drop_"):
+                code = sum(ord(c) for c in name)
+                petal_qpos_adr.append(int(self.model.jnt_qposadr[j]))
+                span = float(self.model.jnt_range[j, 1] - self.model.jnt_range[j, 0])
+                petal_span.append(max(0.05, span))
+                petal_speed.append(0.22 + 0.16 * (((code // 11) % 15) / 14.0))
+                petal_phase.append((code % 97) * 0.03)
+            elif name.startswith("waterfall_flow_"):
+                code = sum(ord(c) for c in name)
+                water_qpos_adr.append(int(self.model.jnt_qposadr[j]))
+                span = float(self.model.jnt_range[j, 1] - self.model.jnt_range[j, 0])
+                water_span.append(max(0.10, span))
+                water_speed.append(0.65 + 0.30 * (((code // 7) % 17) / 16.0))
+                water_phase.append((code % 131) * 0.05)
+
+        self._decor_sway_qpos_adr = np.asarray(sway_qpos_adr, dtype=int)
+        self._decor_sway_amp = np.asarray(sway_amp, dtype=np.float64)
+        self._decor_sway_freq = np.asarray(sway_freq, dtype=np.float64)
+        self._decor_sway_phase = np.asarray(sway_phase, dtype=np.float64)
+        self._decor_petal_qpos_adr = np.asarray(petal_qpos_adr, dtype=int)
+        self._decor_petal_span = np.asarray(petal_span, dtype=np.float64)
+        self._decor_petal_speed = np.asarray(petal_speed, dtype=np.float64)
+        self._decor_petal_phase = np.asarray(petal_phase, dtype=np.float64)
+        self._decor_waterfall_qpos_adr = np.asarray(water_qpos_adr, dtype=int)
+        self._decor_waterfall_span = np.asarray(water_span, dtype=np.float64)
+        self._decor_waterfall_speed = np.asarray(water_speed, dtype=np.float64)
+        self._decor_waterfall_phase = np.asarray(water_phase, dtype=np.float64)
+
+    def _animate_decorations(self):
+        """Drive decorative joints directly in qpos space (purely visual)."""
+        t = float(self.data.time)
+        if self._decor_sway_qpos_adr.size:
+            self.data.qpos[self._decor_sway_qpos_adr] = (
+                self._decor_sway_amp
+                * np.sin(self._decor_sway_freq * t + self._decor_sway_phase)
+            )
+        if self._decor_petal_qpos_adr.size:
+            self.data.qpos[self._decor_petal_qpos_adr] = np.mod(
+                self._decor_petal_speed * t + self._decor_petal_phase,
+                self._decor_petal_span,
+            )
+        if self._decor_waterfall_qpos_adr.size:
+            self.data.qpos[self._decor_waterfall_qpos_adr] = np.mod(
+                self._decor_waterfall_speed * t + self._decor_waterfall_phase,
+                self._decor_waterfall_span,
+            )
 
     def _get_heading_error(self, head_to_target_vec):
         """Heading error between the head's forward direction and the direction
@@ -444,6 +519,7 @@ class SnakeEnv(gym.Env):
             target_positions = self.cpg.update()
             clipped_targets = np.clip(target_positions, act_lo, act_hi)
             self.data.ctrl[:] = clipped_targets
+            self._animate_decorations()
 
             mujoco.mj_step(self.model, self.data)
 

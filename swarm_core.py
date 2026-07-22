@@ -461,6 +461,7 @@ class SnakeSwarm:
         self.model = mujoco.MjModel.from_xml_path(self.combined_xml)
         self.data = mujoco.MjData(self.model)
         mujoco.mj_forward(self.model, self.data)
+        self._resolve_decorative_joints()
 
         self.snakes = [
             SnakeState(self.model, prefixes[i], colors[i], specs[i]["label"],
@@ -468,6 +469,65 @@ class SnakeSwarm:
             for i in range(n)
         ]
         self.viewer = None
+
+    def _resolve_decorative_joints(self):
+        """Cache optional decorative cherry joints in combined scene models."""
+        sway_qpos_adr, sway_amp, sway_freq, sway_phase = [], [], [], []
+        petal_qpos_adr, petal_span, petal_speed, petal_phase = [], [], [], []
+        water_qpos_adr, water_span, water_speed, water_phase = [], [], [], []
+        for j in range(self.model.njnt):
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, j) or ""
+            if name.startswith("cherry_sway_"):
+                code = sum(ord(c) for c in name)
+                sway_qpos_adr.append(int(self.model.jnt_qposadr[j]))
+                sway_amp.append(0.10 + 0.10 * ((code % 17) / 16.0))
+                sway_freq.append(1.2 + 0.8 * (((code // 17) % 13) / 12.0))
+                sway_phase.append((code % 37) * 0.17)
+            elif name.startswith("cherry_petal_drop_"):
+                code = sum(ord(c) for c in name)
+                petal_qpos_adr.append(int(self.model.jnt_qposadr[j]))
+                span = float(self.model.jnt_range[j, 1] - self.model.jnt_range[j, 0])
+                petal_span.append(max(0.05, span))
+                petal_speed.append(0.22 + 0.16 * (((code // 11) % 15) / 14.0))
+                petal_phase.append((code % 97) * 0.03)
+            elif name.startswith("waterfall_flow_"):
+                code = sum(ord(c) for c in name)
+                water_qpos_adr.append(int(self.model.jnt_qposadr[j]))
+                span = float(self.model.jnt_range[j, 1] - self.model.jnt_range[j, 0])
+                water_span.append(max(0.10, span))
+                water_speed.append(0.65 + 0.30 * (((code // 7) % 17) / 16.0))
+                water_phase.append((code % 131) * 0.05)
+        self._decor_sway_qpos_adr = np.asarray(sway_qpos_adr, dtype=int)
+        self._decor_sway_amp = np.asarray(sway_amp, dtype=np.float64)
+        self._decor_sway_freq = np.asarray(sway_freq, dtype=np.float64)
+        self._decor_sway_phase = np.asarray(sway_phase, dtype=np.float64)
+        self._decor_petal_qpos_adr = np.asarray(petal_qpos_adr, dtype=int)
+        self._decor_petal_span = np.asarray(petal_span, dtype=np.float64)
+        self._decor_petal_speed = np.asarray(petal_speed, dtype=np.float64)
+        self._decor_petal_phase = np.asarray(petal_phase, dtype=np.float64)
+        self._decor_waterfall_qpos_adr = np.asarray(water_qpos_adr, dtype=int)
+        self._decor_waterfall_span = np.asarray(water_span, dtype=np.float64)
+        self._decor_waterfall_speed = np.asarray(water_speed, dtype=np.float64)
+        self._decor_waterfall_phase = np.asarray(water_phase, dtype=np.float64)
+
+    def _animate_decorations(self):
+        """Update decorative joints before each physics step."""
+        t = float(self.data.time)
+        if self._decor_sway_qpos_adr.size:
+            self.data.qpos[self._decor_sway_qpos_adr] = (
+                self._decor_sway_amp
+                * np.sin(self._decor_sway_freq * t + self._decor_sway_phase)
+            )
+        if self._decor_petal_qpos_adr.size:
+            self.data.qpos[self._decor_petal_qpos_adr] = np.mod(
+                self._decor_petal_speed * t + self._decor_petal_phase,
+                self._decor_petal_span,
+            )
+        if self._decor_waterfall_qpos_adr.size:
+            self.data.qpos[self._decor_waterfall_qpos_adr] = np.mod(
+                self._decor_waterfall_speed * t + self._decor_waterfall_phase,
+                self._decor_waterfall_span,
+            )
 
     # --- prediction: batch snakes that share the same policy object --------
     def _predict_all(self):
@@ -662,6 +722,7 @@ class SnakeSwarm:
                             tgt = np.clip(s.cpg.update(),
                                           s.jnt_range[:, 0], s.jnt_range[:, 1])
                             self.data.ctrl[s.ctrl_idx] = tgt
+                    self._animate_decorations()
                     mujoco.mj_step(self.model, self.data)
                     if recording and substep % capture_every == 0:
                         renderer.update_scene(self.data, camera=cam)

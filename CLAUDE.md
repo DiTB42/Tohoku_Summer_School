@@ -156,7 +156,20 @@ The maze XML is **generated at runtime, not authored by hand**:
   `_mountain_layers_for_cell` (asymmetric brown mountain stacks that grow OUT of a wall's exposed
   corridor face — 1-5 tapering tiers + optional peak — on only ~1/4-1/3 of walls, gated by
   `_should_add_mountain_wall`/`_exposed_wall_faces`), and `_add_base_stones`/`_base_stones_for_cell`
-  (2-3 grey caps on ~half the walls). Both are children of the `box_*` bodies. Plus
+  (2-3 grey caps on ~half the walls). Cherry blossoms are now also injected on a subset of those
+  decorated walls (`_add_cherry_blossom_tree`): a brown trunk + pink canopy made from many clustered
+  small rectangular leaf blocks, plus tiny rectangular petals over nearby corridor-facing edges.
+  Placement now mixes single trees and
+  clusters, with short/medium/tall height variants and narrow/wide canopy variants; some trees
+  intentionally overhang slightly into the route for visual drama. Tree/petal geoms are children of
+  the `box_*` bodies and include
+  decorative joints named `cherry_sway_*` (canopy sway) and `cherry_petal_drop_*` (looping falling
+  petals). A decorative waterfall is also spawned from the tallest generated mountain peak as a
+  straight vertical drop to the floor, built entirely from rectangular blue/white box strips and
+  animated through
+  `waterfall_flow_*` slide joints. All decoration joints are animated at runtime in both `SnakeEnv`
+  and `SnakeSwarm` by directly writing their `qpos` each physics substep (no extra actuators; snake
+  control remains unchanged). Plus
   `_add_goal_beacon` (a small translucent `beacon` pillar+orb over the goal) and `_recolor_scene`
   (greener groundplane + warmer skybox, done in-place on the parsed `<asset>` at gen time — NOT
   baked into `scene.xml`, so the recolor is properly gated). **All decoration geoms are
