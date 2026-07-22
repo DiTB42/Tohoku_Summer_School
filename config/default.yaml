@@ -15,6 +15,14 @@ reward:
   # so stalling/crashing never beats finishing.
   w_goal: 100.0             # one-shot terminal bonus for reaching the goal
   time_penalty: 0.05        # per-step living cost → rewards finishing fast
+  # One-shot bonus per newly reached waypoint (breadcrumb trail: rewards
+  # partial progress on maps the terrain makes hard to finish). Scale: the
+  # path is always 30 waypoints, so total waypoint income = 30 * w_waypoint
+  # = 30 — below w_goal (100, finishing stays dominant) and ~10% of the
+  # cumulative velocity term of a finished episode (~300-450). One bonus
+  # (1.0) is also smaller than a single good step's velocity reward (~4.5),
+  # so it nudges rather than dominates.
+  w_waypoint: 1.0
 
 cpg:
   frequency_hz: 50.0        # CPG update frequency for standalone use (dt = 1/frequency_hz)
@@ -48,8 +56,17 @@ env:
   cpg_frequency: 50
   rl_frequency: 0.2
   max_episode_steps: 250    # goal is now a fixed ~30-cell A* path; needs time to traverse
-  maze_height: 10           # KEEP: corridor-only, see README Limitations
-  maze_width: 10
+  # Maze dims must be ODD for a fully walled perimeter; even values are
+  # normalized up to the next odd by create_maze_layout (even sizes used to
+  # leave the bottom/right outer walls open). 11x11 == the old effective
+  # 10x10 junction grid, now properly walled.
+  maze_height: 11           # KEEP: corridor-only, see README Limitations
+  maze_width: 11
+  # Per-cell terrain (grass/ice/dirt) AND variable-width caves. Set false (or
+  # pass --no-terrain to train/test/viz/benchmark scripts) for presentation mode:
+  # bare 1-wide maze, no terrain physics, no caves. Obs stays 42-D either way
+  # (terrain dims read grass mu, width dims read 1.0).
+  terrain_enabled: true
   # 学生課題1 (行動空間 R⁴ 化, docs/STUDENT_TASKS_JP.md): 行動空間は
   # (R, ω, θ, δ) の4次元。各リストは [R, omega, theta, delta] の順。
   #   R     : joint amplitude (rad)

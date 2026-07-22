@@ -38,32 +38,43 @@ import numpy as np
 
 
 # --- observation layout (mirrors env_snake.SnakeEnv._get_obs) --------------
-# The env always emits the full 38-D observation, but checkpoints come from
-# three eras with different widths (see CLAUDE.md / swarm_core.py). The full
-# 38-D layout, in order, is:
+# The env always emits the full 42-D observation, but checkpoints come from
+# five eras with different widths (see CLAUDE.md / swarm_core.py). The full
+# 42-D layout, in order, is:
 #   [ joint_pos(12) | joint_vel(12) | head->target xy(2) | orient(2)
 #     | head angular velocity(3) | heading error(2) | next-turn(1)
-#     | last action(4) ]
+#     | terrain friction head+tail(2) | cave width cur+next(2) | last action(4) ]
 # Older policies omit the trailing-but-not-last blocks:
-#   37-D: drop the 1-D next-turn signal
-#   34-D: drop next-turn AND the 3-D head angular velocity block
-# We build the model-appropriate obs by slicing the full 38-D vector.
-_FULL_OBS_DIM = 38
+#   40-D: drop the 2-D cave-width block
+#   38-D: also drop the 2-D terrain-friction block
+#   37-D: also drop the 1-D next-turn signal
+#   34-D: also drop the 3-D head angular velocity block
+# We build the model-appropriate obs by slicing the full 42-D vector.
+_FULL_OBS_DIM = 42
 _ANGVEL_SLICE = slice(28, 31)   # head angular velocity (3)
 _NEXT_TURN_IDX = 33             # next-turn signal (1)
+_TERRAIN_SLICE = slice(34, 36)  # terrain friction under head, tail (2)
+_WIDTH_SLICE = slice(36, 38)    # cave width current, next-path cell (2)
 
 
 def adapt_obs(full_obs, obs_dim):
-    """Slice the env's full 38-D observation down to what `obs_dim` expects."""
+    """Slice the env's full 42-D observation down to what `obs_dim` expects."""
     if obs_dim == _FULL_OBS_DIM:
         return full_obs
-    if obs_dim == 37:  # drop next-turn signal only
-        return np.delete(full_obs, _NEXT_TURN_IDX)
-    if obs_dim == 34:  # drop next-turn AND head angular velocity
-        drop = list(range(_ANGVEL_SLICE.start, _ANGVEL_SLICE.stop)) + [_NEXT_TURN_IDX]
+    width_idx = list(range(_WIDTH_SLICE.start, _WIDTH_SLICE.stop))
+    terrain_idx = list(range(_TERRAIN_SLICE.start, _TERRAIN_SLICE.stop))
+    if obs_dim == 40:  # drop cave width only
+        return np.delete(full_obs, width_idx)
+    if obs_dim == 38:  # drop cave width AND terrain friction
+        return np.delete(full_obs, terrain_idx + width_idx)
+    if obs_dim == 37:  # drop cave width, terrain AND next-turn signal
+        return np.delete(full_obs, [_NEXT_TURN_IDX] + terrain_idx + width_idx)
+    if obs_dim == 34:  # drop cave width, terrain, next-turn AND head angular velocity
+        drop = (list(range(_ANGVEL_SLICE.start, _ANGVEL_SLICE.stop))
+                + [_NEXT_TURN_IDX] + terrain_idx + width_idx)
         return np.delete(full_obs, drop)
     raise ValueError(
-        f"Unsupported policy observation dim {obs_dim}; expected 34, 37 or 38. "
+        f"Unsupported policy observation dim {obs_dim}; expected 34, 37, 38, 40 or 42. "
         "Update adapt_obs() if the obs layout changed."
     )
 
@@ -130,6 +141,11 @@ def main():
                         help="Output path for the plot (PNG).")
     parser.add_argument("--csv", type=str, default="benchmark_time_vs_steps.csv",
                         help="Output path for the raw per-model data (CSV).")
+    parser.add_argument("--no-terrain", action="store_true",
+                        help="Benchmark without per-cell terrain (grass/ice/"
+                             "dirt tiles) or variable-width caves: bare 1-wide "
+                             "maze. Obs stays 42-D (terrain dims read the constant "
+                             "grass mu, width dims read the constant 1.0).")
     args = parser.parse_args()
 
     # Import heavy deps after arg parsing so --help is instant.
@@ -151,6 +167,8 @@ def main():
 
     # One env, reused across every model and maze. Headless (no render).
     config = load_config(args.config)
+    if args.no_terrain:
+        config.env.terrain_enabled = False
     env = SnakeEnv(render_mode=None, config=config)
     env.max_episode_steps = args.max_steps
 

@@ -20,6 +20,7 @@ dist/
 
 # Trained models / checkpoints
 models/checkpoints/
+models/checkpoints_no_terrain/
 *.pt
 *.pth
 

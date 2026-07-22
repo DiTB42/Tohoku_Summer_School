@@ -89,6 +89,8 @@ def main():
 
     paths = _resolve_paths(args)
     config = load_config(args.config)
+    if not args.terrain_enabled:  # --no-terrain (from add_common_args)
+        config.env.terrain_enabled = False
     colors = distinct_colors(len(paths))
 
     specs = []

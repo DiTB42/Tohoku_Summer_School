@@ -26,6 +26,16 @@ class RewardConfig:
     # w_goal >> time_penalty * max_episode_steps to avoid "give-up" behavior.
     w_goal: float = 100.0        # one-shot terminal bonus granted on reaching the goal
     time_penalty: float = 0.05   # per-step living cost (subtracted every RL step)
+    # One-shot bonus per NEWLY reached waypoint (also a divergence from the
+    # paper). With terrain hazards some maps are hard to finish; this is a
+    # breadcrumb trail that rewards partial progress along the A* path.
+    # Scale guardrail: the path has GOAL_PATH_LENGTH (=30) waypoints, so the
+    # total waypoint income is 30*w_waypoint — keep that well below w_goal
+    # (so finishing stays the objective) and small vs the cumulative velocity
+    # term (~300-450 per finished episode at w_velocity=50).
+    # Default 0.0 = pre-existing behavior (no bonus); config/default.yaml
+    # enables it at 1.0.
+    w_waypoint: float = 0.0
 
 
 @dataclass
@@ -72,6 +82,12 @@ class EnvConfig:
     max_episode_steps: int = 300
     maze_height: int = 3
     maze_width: int = 7
+    # Per-cell terrain (grass/ice/dirt tiles) AND variable-width caves. False =
+    # presentation mode: no tiles/terrain physics and no widened corridors, bare
+    # 1-wide maze everywhere. The observation STAYS 42-D (the two terrain dims
+    # read the constant grass mu=3.0, the two width dims read the constant 1.0),
+    # so trained checkpoints remain compatible either way. CLI: --no-terrain.
+    terrain_enabled: bool = True
     # 学生課題1: 行動空間 R⁴ = (R, omega, theta, delta). Per-parameter bounds,
     # each a 4-element list ordered [R, omega, theta, delta].
     action_low: list = None

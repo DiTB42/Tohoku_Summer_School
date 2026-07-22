@@ -38,6 +38,7 @@ class RewardTermCallback(BaseCallback):
         "term_velocity",
         "term_smoothness",
         "term_goal",
+        "term_waypoint",
         "term_time",
         "raw_r1_proximity",
         "raw_r2_closing",
@@ -99,6 +100,11 @@ if __name__ == "__main__":
                         help="Number of parallel environments (SubprocVecEnv). "
                              "Overrides config training.n_envs. 1 = single-env "
                              "(original behavior). ~8 recommended on this machine.")
+    parser.add_argument("--no-terrain", action="store_true",
+                        help="Train without per-cell terrain (grass/ice/dirt "
+                             "tiles) or variable-width caves: bare 1-wide maze. "
+                             "Obs stays 42-D (terrain dims read the constant grass "
+                             "mu, width dims read the constant 1.0).")
     args = parser.parse_args()
 
     # Keep the machine awake during long training (Windows). Done inside the
@@ -109,6 +115,11 @@ if __name__ == "__main__":
 
     config_path = args.config or "config/default.yaml"
     config = load_config(config_path)
+    # Mutate the loaded config so the flag reaches every env built from it
+    # (probe, make_env closures — pickled into SubprocVecEnv workers — and
+    # the render env).
+    if args.no_terrain:
+        config.env.terrain_enabled = False
 
     # Resolve the number of parallel envs: CLI overrides config.
     n_envs = args.n_envs if args.n_envs is not None else config.training.n_envs

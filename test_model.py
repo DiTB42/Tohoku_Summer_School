@@ -27,6 +27,11 @@ if __name__ == "__main__":
                              "physics time; larger = slower (e.g. 4.0 = 4x "
                              "slower), smaller = faster. If omitted, uses the "
                              "config value or the env default (2.0).")
+    parser.add_argument("--no-terrain", action="store_true",
+                        help="Roll out without per-cell terrain (grass/ice/"
+                             "dirt tiles) or variable-width caves: bare 1-wide "
+                             "maze. Obs stays 42-D (terrain dims read the "
+                             "constant grass mu, width dims read the constant 1.0).")
     args = parser.parse_args()
 
     # Load the model
@@ -35,6 +40,8 @@ if __name__ == "__main__":
     # Create the environment in rendering mode, using the same config the
     # model was trained with (maze size, frequencies, reward, ...).
     config = load_config(args.config)
+    if args.no_terrain:
+        config.env.terrain_enabled = False
     env = SnakeEnv(render_mode="human", config=config,
                    render_slowdown=args.render_slowdown)
     # Test maps can be larger than the training maps, so the training-tuned
@@ -57,6 +64,9 @@ if __name__ == "__main__":
         + ["az", "angle"]                  # head orientation (axis z-comp, angle)
         + ["wx", "wy", "wz"]               # head angular velocity
         + ["cos_e", "sin_e"]               # heading error (head-forward vs target)
+        + ["turn"]                         # next-turn signal (+1 L / -1 R / 0 straight)
+        + ["mu_head", "mu_tail"]           # terrain friction under head, tail
+        + ["w_cur", "w_next"]              # cave width current, next-path cell
         + [f"act{i}" for i in range(act_dim)]  # last action (R, omega, theta, delta)
     )
 

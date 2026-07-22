@@ -5,15 +5,16 @@ import mujoco
 import mujoco.viewer
 import os
 import time
-from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar, cell_distances
-from mazes.mujoco_tools import make_maze_on_mujoco
+from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar, cell_distances, generate_terrain, generate_widths
+from mazes.mujoco_tools import make_maze_on_mujoco, TERRAIN_FRICTION
 from cpg.snake_cpg import PaperCPG
 from config_utils import load_config
 
 # Every episode's goal is exactly this many A* moves (edges) from the start, so
 # episode difficulty (path length) is constant and training is predictable. If a
 # freshly generated maze has no cell at this exact distance, reset() regenerates the
-# maze (up to MAX_MAZE_ATTEMPTS times); ~99% of 10x10 mazes qualify on the first try.
+# maze (up to MAX_MAZE_ATTEMPTS times); ~99% of 11x11 mazes (the default; even
+# configured sizes are normalized up to odd) qualify on the first try.
 GOAL_PATH_LENGTH = 30
 MAX_MAZE_ATTEMPTS = 1000
 
@@ -81,9 +82,21 @@ class SnakeEnv(gym.Env):
         #   head angular velocity   : 3
         #   heading error (cos, sin): 2   (head-forward vs target dir in xy plane)
         #   next-turn signal        : 1   (turn AT the next waypoint: +1 left, -1 right, 0 straight)
+        #   terrain friction        : 2   (raw tangential mu of the cell under head, under tail:
+        #                                  ice=0.5, grass=3.0, dirt=7.0 — see TERRAIN_FRICTION)
+        #   cave width              : 2   (open corridor span in world units of the current cell
+        #                                  and the next path cell: 1.0 normal .. ~0.12 tightest pinch)
         #   last action             : act_dim (makes the r3 smoothness penalty Markovian)
-        obs_dim = 2 * self.n_actuated + 2 + 2 + 3 + 2 + 1 + act_dim
+        obs_dim = 2 * self.n_actuated + 2 + 2 + 3 + 2 + 1 + 2 + 2 + act_dim
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
+        # Per-cell terrain map {(col, row): 'grass'|'ice'|'dirt'}; populated in
+        # reset() (the __init__ dummy build below has no terrain). Empty map =>
+        # _get_terrain_friction falls back to grass everywhere.
+        self.terrain_map = {}
+        # Per-cell cave width map {(col, row): extension e}; the A* solution path in
+        # cell coords. Both populated in reset() (empty here / with --no-terrain).
+        self.width_map = {}
+        self.path_maze = []
         self.maze_layout = create_maze_layout(config.env.maze_height, config.env.maze_width)
         make_maze_on_mujoco(
             load_file_path=self.base_xml_path,
@@ -121,6 +134,39 @@ class SnakeEnv(gym.Env):
         pos_y = -2 * 0.5 * (maze_pos[1] - self.start_pos_maze[1])
         return np.array([pos_x, pos_y, 0.15])
 
+    def _world_to_maze(self, world_pos):
+        """Inverse of _maze_to_world: world xy -> (col, row) maze cell.
+        Cell pitch is 2*0.5 = 1.0 world units; the y-axis is flipped."""
+        col = int(round(world_pos[0])) + self.start_pos_maze[0]
+        row = int(round(-world_pos[1])) + self.start_pos_maze[1]
+        return (col, row)
+
+    def _get_terrain_friction(self, body_name):
+        """Raw tangential friction mu of the terrain cell under a body — what
+        the snake "feels" through that body (see TERRAIN_FRICTION: ice=0.5,
+        grass=3.0, dirt=7.0). Falls back to grass when the body hangs over a
+        wall cell or off-grid (walls have no terrain), or before reset()."""
+        cell = self._world_to_maze(self.data.body(body_name).xpos)
+        return TERRAIN_FRICTION.get(self.terrain_map.get(cell, "grass"), TERRAIN_FRICTION["grass"])
+
+    def _get_cave_widths(self):
+        """Open corridor span (world units) of the CURRENT cell and the NEXT path
+        cell, so the policy can pre-adjust its gait to a narrowing (pinch) ahead.
+
+        A cell's span is 1.0 - 2*e where e is its cave extension (0 for a normal
+        1-wide corridor, wall, off-grid cell, or when caves are disabled; the
+        tightest pinch is ~0.12). The current cell is looked up under the head (like
+        _get_terrain_friction); the next cell is one step further along the A* path,
+        index-clamped exactly like _get_next_turn_signal / _get_current_target."""
+        cell = self._world_to_maze(self.data.body('frame_0-1').xpos)
+        w_cur = 1.0 - 2.0 * self.width_map.get(cell, 0.0)
+        if self.path_maze:
+            b = min(self.current_waypoint_index + 1, len(self.path_maze) - 1)
+            w_next = 1.0 - 2.0 * self.width_map.get(self.path_maze[b], 0.0)
+        else:
+            w_next = 1.0
+        return w_cur, w_next
+
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         if self.viewer is not None:
@@ -147,16 +193,46 @@ class SnakeEnv(gym.Env):
         goal_idx = self.np_random.integers(0, len(goal_candidates))
         goal_pos_maze = goal_candidates[goal_idx]
 
+        # Per-cell terrain (grass/ice/dirt), spatially correlated BFS fill from
+        # the always-grass start cell. Drawn from self.np_random at a FIXED
+        # point (right after the goal draw) so seeded resets stay reproducible.
+        # terrain_enabled=False (--no-terrain): empty map -> no tiles injected,
+        # obs terrain dims fall back to grass mu (still 42-D). terrain and the
+        # cave widths below are the ONLY np_random consumers after the goal draw
+        # and are gated on the same flag, so maze/goal for a given seed are
+        # identical whether or not terrain/caves are enabled.
+        if self.config.env.terrain_enabled:
+            self.terrain_map = generate_terrain(self.maze_layout, self.start_pos_maze, self.np_random)
+        else:
+            self.terrain_map = {}
+
         # A* path towards new goal (len(path_maze) - 1 == GOAL_PATH_LENGTH by construction)
         path_maze = astar(self.maze_layout, self.start_pos_maze, goal_pos_maze)
-        
-        # New xml with new goal and waypoints  
+
+        # Per-cell cave widths (wider corridor sections) along the path, gated by the
+        # SAME terrain flag. Drawn from self.np_random AFTER terrain — the last
+        # np_random consumer — so maze/goal/terrain for a given seed are byte-identical
+        # whether or not caves are enabled (--no-terrain -> empty map, obs width dims
+        # read the constant 1.0, obs stays 42-D).
+        if self.config.env.terrain_enabled:
+            self.width_map = generate_widths(self.maze_layout, path_maze, self.np_random)
+        else:
+            self.width_map = {}
+        self.path_maze = path_maze
+
+        # New xml with new goal, waypoints, terrain tiles and caves
         make_maze_on_mujoco(
             load_file_path=self.base_xml_path,
             maze=np.array(self.maze_layout),
             start_pos=self.start_pos_maze,
             goal_pos=goal_pos_maze,
             waypoints=path_maze,
+            terrain=self.terrain_map,
+            widths=self.width_map,
+            # Cosmetic-only dressing (mountains/stones/floor props/goal beacon +
+            # scene recolor); gated by the same flag as terrain, injects no
+            # colliding/obs geometry, seeded off the maze layout (not np_random).
+            decorations=self.config.env.terrain_enabled,
             save_file_path=self.maze_xml_path
         )
         
@@ -314,10 +390,16 @@ class SnakeEnv(gym.Env):
         head_angular_vel = self._get_head_angular_velocity()
         heading_error = self._get_heading_error(head_to_target_vec)  # [cos e, sin e]
         next_turn = self._get_next_turn_signal()  # +1 left / -1 right / 0 straight at next waypoint
+        # Terrain friction "felt" under the head and tail bodies (raw mu).
+        terrain_head = self._get_terrain_friction('frame_0-1')
+        terrain_tail = self._get_terrain_friction('frame12-2')
+        # Cave width (open corridor span) of the current and next-path cell.
+        w_cur, w_next = self._get_cave_widths()
 
         obs = np.concatenate([
             joint_pos, joint_vel, head_to_target_xy, orient_z_angle,
-            head_angular_vel, heading_error, [next_turn], np.ravel(self.last_action)
+            head_angular_vel, heading_error, [next_turn],
+            [terrain_head, terrain_tail], [w_cur, w_next], np.ravel(self.last_action)
         ]).astype(np.float32)
 
 
@@ -376,9 +458,13 @@ class SnakeEnv(gym.Env):
         r2 = np.sign(r2) * r2 * r2
         # Waypoint "reached" is judged against the waypoint's own world
         # coordinates, not the lookahead midpoint used for reward shaping.
-        # (Only the waypoint-index advancement is kept here; the one-shot
-        # bonus reward that used to be granted is NOT part of the paper's
-        # reward eq.(12) and has been removed.)
+        # Reaching a NEW waypoint grants a one-shot w_waypoint bonus (a
+        # deliberate divergence from the paper's eq.(12), reintroduced when
+        # terrain hazards made some maps hard to finish: a breadcrumb trail
+        # that rewards partial progress along the A* path — see RewardConfig
+        # for the scale guardrail). One-shot per waypoint, so loitering at a
+        # waypoint earns nothing after the first hit.
+        waypoint_reached = False
         if self.current_waypoint_index < len(self.path_waypoints_world):
             actual_waypoint = self.path_waypoints_world[self.current_waypoint_index]
             dist_to_actual_waypoint = np.linalg.norm(actual_waypoint - new_head_pos)
@@ -391,6 +477,7 @@ class SnakeEnv(gym.Env):
                 if not already_reached:
                     self.reached_waypoints.append(reached_waypoint)
                     self.current_waypoint_index += 1
+                    waypoint_reached = True
 
         # Paper reward, eq.(12): three terms only.
         #   r1: proximity reward (large when close to the target)
@@ -419,8 +506,12 @@ class SnakeEnv(gym.Env):
         #   term_time: per-step living cost, a direct pressure to finish fast.
         term_goal = reward_cfg.w_goal * (1.0 if terminated else 0.0)
         term_time = reward_cfg.time_penalty  # subtracted every step
+        #   term_waypoint: one-shot bonus per newly reached waypoint (the goal
+        #     is also the final waypoint, so the finishing step earns both
+        #     term_waypoint and term_goal — negligible next to w_goal).
+        term_waypoint = reward_cfg.w_waypoint * (1.0 if waypoint_reached else 0.0)
         reward = (term_progress + term_velocity - term_smoothness
-                  + term_goal - term_time)
+                  + term_goal + term_waypoint - term_time)
 
         truncated = self.current_step >= self.max_episode_steps
         # Stored as a flat float32 vector: it is fed back into the observation
@@ -436,6 +527,7 @@ class SnakeEnv(gym.Env):
             "term_velocity": float(term_velocity),
             "term_smoothness": float(term_smoothness),
             "term_goal": float(term_goal),
+            "term_waypoint": float(term_waypoint),
             "term_time": float(-term_time),  # stored signed, since it is a penalty
             "raw_r1_proximity": float(r1),
             "raw_r2_closing": float(r2),

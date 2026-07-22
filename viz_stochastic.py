@@ -33,6 +33,8 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    if not args.terrain_enabled:  # --no-terrain (from add_common_args)
+        config.env.terrain_enabled = False
     model = SAC.load(args.model_path)  # one shared policy; predict() is batched
 
     colors = distinct_colors(args.n)

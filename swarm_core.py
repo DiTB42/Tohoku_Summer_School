@@ -18,8 +18,9 @@ merges them into one scene via ElementTree (the same XML-surgery idiom as
 ``mazes/mujoco_tools.make_maze_on_mujoco``).
 
 This module does NOT modify training. The observation builder here mirrors
-``env_snake.SnakeEnv._get_obs`` EXACTLY (37-D) -- if that layout ever changes,
-update ``SnakeState.get_obs`` here to match, or predictions become garbage.
+``env_snake.SnakeEnv._get_obs`` EXACTLY (34/37/38/40/42-D eras auto-detected per
+policy) -- if that layout ever changes, update ``SnakeState.get_obs`` here to
+match, or predictions become garbage.
 """
 
 import os
@@ -33,8 +34,8 @@ import numpy as np
 import mujoco
 import mujoco.viewer
 
-from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar
-from mazes.mujoco_tools import make_maze_on_mujoco
+from mazes.make_maze import create_maze_layout, get_valid_spawn_points, astar, generate_terrain, generate_widths
+from mazes.mujoco_tools import make_maze_on_mujoco, TERRAIN_FRICTION
 from cpg.snake_cpg import PaperCPG
 from config_utils import load_config
 
@@ -69,6 +70,14 @@ def maze_to_world(maze_pos, start_pos=START_POS_MAZE):
     return np.array([pos_x, pos_y, 0.15])
 
 
+def world_to_maze(world_pos, start_pos=START_POS_MAZE):
+    """Inverse of maze_to_world: world xy -> (col, row). Mirrors
+    SnakeEnv._world_to_maze (cell pitch 1.0 world units, flipped y)."""
+    col = int(round(world_pos[0])) + start_pos[0]
+    row = int(round(-world_pos[1])) + start_pos[1]
+    return (col, row)
+
+
 def distinct_colors(n):
     """n visually distinct RGB colors by evenly spacing hue (no matplotlib dep)."""
     cols = []
@@ -95,6 +104,15 @@ def build_shared_maze(config, seed=None):
         np.random.seed(seed)
 
     maze = create_maze_layout(config.env.maze_height, config.env.maze_width)
+    # Per-cell terrain (grass/ice/dirt), same generator as SnakeEnv.reset():
+    # BFS fill from the always-grass start cell, keep-probability per parent
+    # type (TERRAIN_KEEP_PROB: grass 0.8, ice/dirt 0.65). terrain=None
+    # (--no-terrain / env.terrain_enabled=false) -> no tiles, and
+    # SnakeState._terrain_mu feeds constant grass mu to terrain-aware policies.
+    if getattr(config.env, "terrain_enabled", True):
+        terrain = generate_terrain(maze, START_POS_MAZE, np.random.default_rng(seed))
+    else:
+        terrain = None
     valid = get_valid_spawn_points(maze)
     sx, sy = START_POS_MAZE
     min_dist = config.env.min_goal_distance
@@ -109,8 +127,21 @@ def build_shared_maze(config, seed=None):
     if path_world:
         path_world[-1] = goal_world.copy()  # snap final waypoint to goal (as env does)
 
+    # Per-cell cave widths along the path, same generator/gate as SnakeEnv.reset().
+    # None (--no-terrain) -> no widened geometry; SnakeState feeds constant 1.0 to
+    # width-aware (42-D) policies.
+    if getattr(config.env, "terrain_enabled", True):
+        widths = generate_widths(maze, path_maze, np.random.default_rng(seed))
+    else:
+        widths = None
+
     return {
         "maze": maze,
+        "terrain": terrain,
+        "widths": widths,
+        # Cosmetic scene dressing, gated by the same flag as terrain (see
+        # make_maze_on_mujoco); the swarm viz is the primary presentation surface.
+        "decorations": getattr(config.env, "terrain_enabled", True),
         "goal_pos": goal_pos,
         "goal_world": goal_world,
         "path_maze": path_maze,
@@ -150,8 +181,8 @@ def build_combined_scene(maze_info, prefixes, colors, out_path, jitter=0.0):
     """
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-    # 1. Maze-only scene (walls + goal + waypoint spheres) from the snake-free
-    #    base. make_maze_on_mujoco appends into <worldbody>.
+    # 1. Maze-only scene (walls + terrain tiles + goal + waypoint spheres) from
+    #    the snake-free base. make_maze_on_mujoco appends into <worldbody>.
     maze_only = out_path + ".maze.xml"
     make_maze_on_mujoco(
         load_file_path=_NOSNAKE_XML,
@@ -159,6 +190,9 @@ def build_combined_scene(maze_info, prefixes, colors, out_path, jitter=0.0):
         start_pos=list(START_POS_MAZE),
         goal_pos=list(maze_info["goal_pos"]),
         waypoints=maze_info["path_maze"],
+        terrain=maze_info.get("terrain"),
+        widths=maze_info.get("widths"),
+        decorations=maze_info.get("decorations", False),
         save_file_path=maze_only,
     )
 
@@ -216,6 +250,7 @@ class SnakeState:
         self.policy = model_policy        # SB3 SAC (may be shared across snakes)
         self.deterministic = deterministic
         self.head_name = f"{prefix}frame_0-1"
+        self.tail_name = f"{prefix}frame12-2"
 
         # Adapt the observation layout to THIS policy's obs space. Checkpoints in
         # this repo come from three eras (see docs / README student-task 1):
@@ -224,6 +259,12 @@ class SnakeState:
         #   * 38-D obs: also adds the 1-D next-turn signal (turn AT the next
         #     waypoint: +1 left / -1 right / 0 straight), inserted between the
         #     heading error and last_action.
+        #   * 40-D obs: also adds the 2-D terrain-friction block (raw mu felt
+        #     under head and tail), looked up in the shared maze's terrain map
+        #     exactly like SnakeEnv._get_terrain_friction.
+        #   * 42-D obs: also adds the 2-D cave-width block (open corridor span of
+        #     the current and next-path cell), looked up in the shared maze's
+        #     width map exactly like SnakeEnv._get_cave_widths.
         # Every checkpoint here uses a 4-D action (R, omega, theta, delta); the
         # scalar-theta era (act_dim=1) is not supported by the CPG mapping below.
         self.act_low = np.asarray(model_policy.action_space.low, dtype=np.float32)
@@ -235,18 +276,22 @@ class SnakeState:
                 f"but only the 4-D (R,omega,theta,delta) action space is supported.")
         obs_dim = int(model_policy.observation_space.shape[0])
         base_no_angvel = 2 * self.N_ACT + 2 + 2 + 2 + self.act_dim  # 34 for act=4
-        # (include_angvel, include_next_turn) keyed by total obs width.
+        # (include_angvel, include_next_turn, include_terrain, include_width)
+        # keyed by total obs width.
         _layouts = {
-            base_no_angvel: (False, False),          # 34
-            base_no_angvel + 3: (True, False),        # 37
-            base_no_angvel + 3 + 1: (True, True),     # 38
+            base_no_angvel: (False, False, False, False),               # 34
+            base_no_angvel + 3: (True, False, False, False),            # 37
+            base_no_angvel + 3 + 1: (True, True, False, False),         # 38
+            base_no_angvel + 3 + 1 + 2: (True, True, True, False),      # 40
+            base_no_angvel + 3 + 1 + 2 + 2: (True, True, True, True),   # 42
         }
         if obs_dim not in _layouts:
             raise RuntimeError(
                 f"swarm_core: policy for {label!r} has obs dim {obs_dim}, "
                 f"expected one of {sorted(_layouts)}; obs layout "
                 f"does not match env_snake._get_obs.")
-        self.include_angvel, self.include_next_turn = _layouts[obs_dim]
+        (self.include_angvel, self.include_next_turn,
+         self.include_terrain, self.include_width) = _layouts[obs_dim]
 
         # Resolve actuated joint qpos/dof/range addresses by prefixed name,
         # exactly like SnakeEnv._resolve_actuated_joints (never a qpos slice:
@@ -288,7 +333,7 @@ class SnakeState:
         # keep it crawling). Captured at the moment `done` flips True.
         self.frozen_ctrl = None
 
-    # --- observation (mirrors env_snake.SnakeEnv._get_obs, 37-D) -----------
+    # --- observation (mirrors env_snake.SnakeEnv._get_obs, per-era layout) --
     def _heading_error(self, data, head_to_target_vec):
         R = data.body(self.head_name).xmat.reshape(3, 3)
         fwd_xy = (-R[:, 0])[:2]
@@ -331,7 +376,33 @@ class SnakeState:
             return 0.0
         return 1.0 if cross > 0 else -1.0
 
-    def get_obs(self, data, path_world, goal_world):
+    def _terrain_mu(self, data, body_name, terrain):
+        """Raw tangential mu of the terrain cell under a body (mirrors
+        SnakeEnv._get_terrain_friction). Grass fallback for wall/off-grid
+        cells or when no terrain map is available."""
+        if not terrain:
+            return TERRAIN_FRICTION["grass"]
+        cell = world_to_maze(data.body(body_name).xpos)
+        return TERRAIN_FRICTION.get(terrain.get(cell, "grass"),
+                                    TERRAIN_FRICTION["grass"])
+
+    def _cave_widths(self, data, path_maze, widths):
+        """Open corridor span (world units) of the current and next-path cell,
+        mirroring SnakeEnv._get_cave_widths (span = 1.0 - 2e, tightest ~0.12). 1.0
+        baseline; wall/off-grid/off-cave or no width map -> 1.0."""
+        if not widths:
+            return 1.0, 1.0
+        cell = world_to_maze(data.body(self.head_name).xpos)
+        w_cur = 1.0 - 2.0 * widths.get(cell, 0.0)
+        if path_maze:
+            b = min(self.waypoint_index + 1, len(path_maze) - 1)
+            w_next = 1.0 - 2.0 * widths.get(tuple(path_maze[b]), 0.0)
+        else:
+            w_next = 1.0
+        return w_cur, w_next
+
+    def get_obs(self, data, path_world, goal_world, terrain=None,
+                path_maze=None, widths=None):
         joint_pos = data.qpos[self.qpos_adr]
         joint_vel = data.qvel[self.dof_adr]
         head_pos = data.body(self.head_name).xpos
@@ -346,6 +417,11 @@ class SnakeState:
         parts.append(heading_err)
         if self.include_next_turn:
             parts.append([self._next_turn_signal(path_world)])  # +1 L / -1 R / 0 straight
+        if self.include_terrain:
+            parts.append([self._terrain_mu(data, self.head_name, terrain),
+                          self._terrain_mu(data, self.tail_name, terrain)])
+        if self.include_width:
+            parts.append(list(self._cave_widths(data, path_maze, widths)))
         parts.append(np.ravel(self.last_action))
         obs = np.concatenate(parts).astype(np.float32)
         return np.clip(obs, -1000.0, 1000.0)
@@ -396,7 +472,11 @@ class SnakeSwarm:
     # --- prediction: batch snakes that share the same policy object --------
     def _predict_all(self):
         obs = [s.get_obs(self.data, self.maze_info["path_world"],
-                         self.maze_info["goal_world"]) for s in self.snakes]
+                         self.maze_info["goal_world"],
+                         terrain=self.maze_info.get("terrain"),
+                         path_maze=self.maze_info["path_maze"],
+                         widths=self.maze_info.get("widths"))
+               for s in self.snakes]
         actions = [None] * len(self.snakes)
         groups = {}
         for i, s in enumerate(self.snakes):
@@ -646,6 +726,12 @@ def add_common_args(parser):
                         help="Run headless (no viewer window, no real-time "
                              "pacing) -- useful for a quick sanity check.")
     parser.set_defaults(render=True)
+    parser.add_argument("--no-terrain", dest="terrain_enabled", action="store_false",
+                        help="Disable per-cell terrain (grass/ice/dirt tiles) and "
+                             "variable-width caves: bare 1-wide maze, e.g. for "
+                             "presentations. Obs stays 42-D (terrain dims read the "
+                             "constant grass mu, width dims read the constant 1.0).")
+    parser.set_defaults(terrain_enabled=True)
     # MP4 recording (offscreen; disables the live viewer while active).
     parser.add_argument("--record", type=str, default=None, metavar="OUT.mp4",
                         help="Render offscreen and write an MP4 to this path "
