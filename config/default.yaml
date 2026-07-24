@@ -47,7 +47,7 @@ training:
   # (original behavior). Set to ~8 on this machine, or pass --n-envs 8, for
   # CPU-parallel training. gradient_steps is auto-scaled by n_envs at runtime.
   n_envs: 1
-  total_timesteps: 1000000
+  total_timesteps: 3000000
   log_interval: 4
   tensorboard_log: sac_snake_tensorboard/
   model_save_path: models/sac_snake_final

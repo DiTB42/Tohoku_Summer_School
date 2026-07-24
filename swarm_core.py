@@ -575,9 +575,9 @@ class SnakeSwarm:
 
     # --- rendering ----------------------------------------------------------
     def _apply_camera(self, cam):
-        """Configure a MjvCamera as a top-down free camera framing the whole maze
-        (not the env's per-head tracking). Shared by the live viewer and the
-        offscreen MP4 recorder."""
+        """Configure a MjvCamera as an isometric free camera (45-degree tilt)
+        framing the whole maze (not the env's per-head tracking). Shared by the
+        live viewer and the offscreen MP4 recorder."""
         maze = np.array(self.maze_info["maze"])
         h, w = maze.shape
         corners = [maze_to_world((0, 0)), maze_to_world((w - 1, h - 1))]
@@ -587,9 +587,12 @@ class SnakeSwarm:
         extent = max(max(xs) - min(xs), max(ys) - min(ys))
         cam.type = mujoco.mjtCamera.mjCAMERA_FREE
         cam.lookat[:] = [cx, cy, 0.0]
-        cam.distance = extent * 1.15 + 2.0
-        cam.azimuth = 90.0
-        cam.elevation = -89.0
+        # Isometric view with a 45-degree downward tilt. The tilt makes the maze
+        # occupy less vertical screen space, so pull the camera back a bit more
+        # than the top-down framing did (but zoomed in somewhat for a closer view).
+        cam.distance = extent * 1.2 + 1.5
+        cam.azimuth = 45.0
+        cam.elevation = -45.0
 
     def _draw_markers(self, scn, append=False):
         """Add the goal marker + per-snake label tags to a scene.
